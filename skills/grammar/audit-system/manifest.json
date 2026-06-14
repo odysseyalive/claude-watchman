@@ -1,0 +1,10 @@
+{
+  "skill": "audit-system",
+  "stage": "grammar",
+  "reads": ["log_path_lynis"],
+  "commands": [
+    { "family": "lynis", "args": "*", "needs_sudo": true }
+  ],
+  "resolver_ops": ["pkg_query", "service_status"],
+  "fixes": []
+}

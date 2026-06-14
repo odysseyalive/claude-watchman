@@ -1,0 +1,10 @@
+{
+  "skill": "inspect-logs",
+  "stage": "grammar",
+  "reads": ["log_path_webserver", "log_path_auth"],
+  "commands": [
+    { "family": "cscli", "args": "*", "needs_sudo": true }
+  ],
+  "resolver_ops": ["journal_read", "net_connections"],
+  "fixes": []
+}

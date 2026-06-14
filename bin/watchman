@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# bin/watchman — the operator entrypoint. A thin verb dispatcher; the operator
+# runs a verb, never a task string or skill path.
+#
+#   watchman audit       Observe + Analyze: run the grammar+logic skills, journal findings. No fixes.
+#   watchman fix         Operator-interactive remediation via rhetoric/fix-redflag, bounded by risk tier.
+#   watchman report      Human-readable summary of the journal (rhetoric/report-status).
+#   watchman loop        ONE pass: observe → journal → correlate delta → conditional send-report.
+#   watchman preflight   Regenerate the permission artifacts from the skill manifests (pure bash).
+#   watchman inventory   What is installed and how it serves (grammar/inventory-services).
+#
+# Cadence is Claude Code's built-in /loop — claude-watchman ships NO scheduler:
+#     /loop 30m watchman loop
+#
+# Skills live under skills/<stage>/<name>/ (NOT .claude/skills/), so they are not
+# auto-discovered. Each verb invokes headless `claude -p` (interactive for `fix`)
+# pointed at the relevant SKILL.md, inheriting non-interactive permissions from
+# .claude/settings.json (defaultMode: dontAsk). The Prime Directive rides INSIDE
+# every SKILL.md, so it governs even when CLAUDE.md is not in context.
+#
+# > PRIME DIRECTIVE: this dispatcher never performs destructive actions itself; it
+# > only invokes skills that each carry the directive. The unattended verbs (loop,
+# > audit, report, inventory) run observe/report only — the dontAsk allowlist makes
+# > applying a review/manual fix impossible without an operator present.
+
+set -euo pipefail
+
+WATCHMAN_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$WATCHMAN_BIN_DIR/.." && pwd)}"
+
+usage() {
+    cat <<'EOF'
+watchman — claude-watchman operator CLI. Run a verb:
+
+  watchman selfcheck   Direct bash plumbing check (NO Claude) — run this FIRST on any new host.
+  watchman audit       Observe + Analyze: run the grammar+logic skills, journal findings. No fixes.
+  watchman fix         Operator-interactive remediation (rhetoric/fix-redflag), bounded by risk tier.
+  watchman report      Human-readable summary of the journal (rhetoric/report-status).
+  watchman loop        ONE pass: observe → journal → correlate delta → conditional send-report.
+  watchman preflight   Regenerate the permission artifacts from the skill manifests (pure bash).
+  watchman inventory   What is installed and how it serves (grammar/inventory-services).
+
+Cadence is Claude Code's built-in /loop — claude-watchman ships NO scheduler:
+    /loop 30m watchman loop
+
+Run-as-user: see README.md § Running. Uses the Claude Code login of whoever runs it —
+supervised (your login) vs unattended (the watchman user's own login). `watchman fix`
+is always supervised.
+EOF
+    exit "${1:-0}"
+}
+
+# Ensure the journal exists before any observe/report verb touches it.
+_ensure_journal() {
+    # shellcheck source=lib/journal.sh
+    source "$WATCHMAN_ROOT/lib/journal.sh"
+    journal_init
+}
+
+# Invoke a skill through Claude Code. $1 = "headless" | "interactive", $2 = prompt.
+_invoke_claude() {
+    local mode="$1" prompt="$2"
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "watchman: the 'claude' CLI is not on PATH. Install Claude Code, then re-run." >&2
+        return 127
+    fi
+    cd "$WATCHMAN_ROOT"
+    local rc=0
+    if [[ "$mode" == headless ]]; then
+        # Non-interactive: runs on the Claude Code login of the user invoking watchman
+        # (no credential handling here — Claude Code owns auth). Permissions come from
+        # .claude/settings.json (dontAsk).
+        claude -p "$prompt" || rc=$?
+        if (( rc != 0 )); then
+            echo "watchman: 'claude -p' exited $rc. If this is an auth failure, log in to Claude" >&2
+            echo "         Code as this user ('claude' then /login) — see README.md § Running." >&2
+        fi
+    else
+        # Interactive: the operator confirms each review/manual fix in their terminal.
+        claude "$prompt" || rc=$?
+    fi
+    return $rc
+}
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+    selfcheck)
+        # Pure bash — NO claude. Proves the resolver/journal/observe plumbing works
+        # on THIS host before you trust the live `claude -p` skill-execution path.
+        # shellcheck source=lib/selfcheck.sh
+        source "$WATCHMAN_ROOT/lib/selfcheck.sh"
+        selfcheck_run
+        ;;
+
+    preflight)
+        # Pure bash — no claude needed. Regenerate both allowlists from manifests.
+        # shellcheck source=lib/preflight.sh
+        source "$WATCHMAN_ROOT/lib/preflight.sh"
+        preflight_run
+        echo "watchman: preflight complete. Install the staged sudoers via install.sh (root)."
+        ;;
+
+    audit)
+        _ensure_journal
+        _invoke_claude headless "$(cat <<'EOF'
+Run claude-watchman AUDIT (Observe + Analyze). Working dir is the claude-watchman root.
+1. Execute each OBSERVE skill in order by following its SKILL.md exactly:
+   skills/grammar/audit-system, skills/grammar/inventory-services,
+   skills/grammar/inspect-logs, skills/grammar/check-log-retention,
+   skills/grammar/check-capacity
+2. Then each ANALYZE skill: skills/logic/diagnose-crash, skills/logic/baseline-network,
+   skills/logic/correlate-findings, skills/logic/prioritize-redflags
+Journal every finding ONLY through lib/journal.sh (create-or-update; never duplicate).
+Do NOT apply any remediation. Obey the Prime Directive embedded in each SKILL.md.
+EOF
+)"
+        echo; echo "Audit complete. Run 'watchman report' for the summary."
+        ;;
+
+    inventory)
+        _ensure_journal
+        _invoke_claude headless "Execute skills/grammar/inventory-services/SKILL.md exactly and report what is installed and how it serves (web server, database, php-fpm, etc.). Journal findings only through lib/journal.sh. Observe only — no changes. Obey the Prime Directive."
+        ;;
+
+    report)
+        _ensure_journal
+        _invoke_claude headless "Execute skills/rhetoric/report-status/SKILL.md exactly: produce a human-readable summary of the current journal state (open, regressed, fixed, ignored), reading only through lib/journal.sh. Make no changes. Obey the Prime Directive."
+        ;;
+
+    loop)
+        _ensure_journal
+        _invoke_claude headless "$(cat <<'EOF'
+Run ONE claude-watchman LOOP pass (Observe → Journal → delta → conditional report):
+1. Execute the OBSERVE skills under skills/grammar/ by following each SKILL.md, journaling
+   via lib/journal.sh only.
+2. Execute skills/logic/correlate-findings/SKILL.md to compute the delta against the
+   previous run (new high-severity findings, and especially REGRESSED findings).
+3. ONLY IF the delta crosses the configured threshold, execute
+   skills/rhetoric/send-report/SKILL.md to email the operator. A quiet machine sends nothing.
+This pass is OBSERVE + REPORT ONLY. Never apply a fix. The dontAsk allowlist forbids mutating
+actions and there is no operator to confirm. Obey the Prime Directive embedded in each SKILL.md.
+EOF
+)"
+        ;;
+
+    fix)
+        _ensure_journal
+        _invoke_claude interactive "Execute skills/rhetoric/fix-redflag/SKILL.md exactly. For each finding, act STRICTLY within its risk_tier: 'safe' on simple approval; 'review' only after showing the exact change and getting explicit per-finding confirmation (firewall rules MUST show the exact rule first — a wrong rule can sever SSH); 'manual' is explained and handed back, never auto-applied. Update finding status via lib/journal.sh as work is done. The Prime Directive's stop-warn-ask gate governs every destructive action."
+        ;;
+
+    ""|-h|--help|help) usage 0 ;;
+    *) echo "watchman: unknown verb '$verb'" >&2; echo; usage 2 ;;
+esac

@@ -1,0 +1,8 @@
+{
+  "skill": "diagnose-crash",
+  "stage": "logic",
+  "reads": [],
+  "commands": [],
+  "resolver_ops": ["journal_read"],
+  "fixes": []
+}

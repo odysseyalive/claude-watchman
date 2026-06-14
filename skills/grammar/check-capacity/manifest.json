@@ -1,0 +1,11 @@
+{
+  "skill": "check-capacity",
+  "stage": "grammar",
+  "reads": [],
+  "commands": [
+    { "family": "df", "args": "*", "needs_sudo": false },
+    { "family": "free", "args": "*", "needs_sudo": false }
+  ],
+  "resolver_ops": ["journal_read"],
+  "fixes": []
+}

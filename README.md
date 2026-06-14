@@ -1,0 +1,177 @@
+# claude-watchman
+
+> **It only speaks up when something's wrong.** claude-watchman watches a Linux box,
+> remembers what it sees, and emails you only when something actually changes. A quiet
+> machine stays quiet. No dashboards to babysit, no alert fatigue.
+
+> **PRIME DIRECTIVE — it never does anything destructive.** Every skill carries one
+> rule, verbatim: nothing that deletes data, modifies a database, severs access, or
+> stops a service happens without stopping to ask you first. The unattended loop has
+> no one to ask — so it physically cannot reach a destructive step. [How that's enforced →](#safety--three-seatbelts)
+
+Most monitoring tools drown you in noise or need a whole stack to run. claude-watchman
+is the opposite: it's a set of Claude Code **skills** that run a simple loop — look at
+the machine, write down what's wrong, and help you fix it — and it only reaches out
+when the picture changes. It runs on Debian/Ubuntu, RHEL-family, and Arch, and adapts
+to whether the box is a public **server** or a personal **workstation**.
+
+It doesn't reinvent the wheel. It drives battle-tested tools — **Lynis**, **CrowdSec**,
+**journald**, your distro's own integrity verifier — and adds the part they're missing:
+a durable journal, plain-language explanations, and the judgment to tell a new problem
+from old news.
+
+## How it works
+
+One cycle, running at different speeds. The journal in the middle is what lets the
+pieces talk to each other.
+
+| Stage | Role | What it does |
+|-------|------|--------------|
+| **Observe** | grammar skills | Read the machine: hardening scan, services, logs, log retention, capacity. |
+| **Analyze** | logic skills | Make sense of it: OOM/crash postmortem, network baseline, dedupe, compute the delta. |
+| **Act & report** | rhetoric skills | Fix what's safe (with your OK), summarize, and email when a threshold trips. |
+
+Every finding lands in a SQLite journal with a stable fingerprint, so re-running never
+creates duplicates — it updates what's already there. The highest-signal event the loop
+can raise is a **regression**: something you fixed that came back.
+
+## Install
+
+**Remote (one line)** — fetches the project and runs the installer. Use the
+`bash -c "$(...)"` form so the prompts keep your terminal:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
+```
+
+**Or from a local checkout:**
+
+```bash
+bash install.sh
+```
+
+It detects your distro and profile, installs dependencies, creates a dedicated
+`watchman` user with a tightly-scoped sudoers file, sets up the journal and config,
+generates the permission allowlist, and links the `watchman` command. It's interactive
+and asks before each privileged step — nothing destructive happens silently.
+
+## Quick start
+
+**1. Check the plumbing first — no Claude needed.** This proves the resolvers, journal,
+dependencies, and permissions all work on this box before you trust anything else.
+
+```bash
+watchman selfcheck
+```
+
+**2. Run your first audit, supervised.** This is also what validates the live skill path.
+
+```bash
+watchman audit && watchman report
+```
+
+**3. Turn on recurring monitoring.** Cadence is Claude Code's built-in `/loop` — there's
+no cron or systemd timer to manage. Type this inside a Claude Code session:
+
+```
+/loop 30m watchman loop
+```
+
+That's it. The loop observes, journals, and emails you only when something crosses a
+threshold.
+
+## Commands
+
+Run a verb — you never have to remember task strings or skill paths.
+
+| Command | What it does |
+|---------|--------------|
+| `watchman selfcheck` | Bash-only plumbing check (no Claude). Run first on any new host. |
+| `watchman audit` | Observe + analyze, journal findings. No fixes. |
+| `watchman report` | Plain-language summary of the journal. |
+| `watchman loop` | One pass: observe → journal → delta → email if it matters. |
+| `watchman fix` | Interactive remediation, bounded by each finding's risk tier. |
+| `watchman inventory` | What's installed and how it serves. |
+| `watchman preflight` | Regenerate the permission allowlists from the skill manifests. |
+
+See what the machine knows right now:
+
+```bash
+watchman report
+```
+
+Fix things — interactively, with you confirming each change:
+
+```bash
+watchman fix
+```
+
+`fix` is the only verb that ever changes the system, and it's always supervised. It
+shows you the exact change, asks before applying anything risky, and never touches a
+firewall rule or SSH config without showing the rule first.
+
+## Running it
+
+Auth is just **Claude Code's own login** — claude-watchman runs *inside* Claude Code and
+uses the login of whoever runs it. There are no API keys or token files anywhere.
+
+**Supervised** (recommended; required for `fix`) — run as yourself in an authenticated
+Claude Code session. Your existing login is used. Nothing to set up.
+
+```bash
+watchman audit
+```
+
+**Unattended** — run the loop as the dedicated `watchman` service user. Log in once as
+that user and Claude Code remembers it:
+
+```bash
+sudo -u watchman -i claude   # then type /login
+```
+
+Then start the loop from a Claude Code session running as that user.
+
+## Safety — three seatbelts
+
+The loop is observe-and-report only. Three independent layers — generated together from
+the same skill manifests, so they can't drift apart — make sure it stays that way:
+
+1. **Risk tiers.** The fixer never auto-applies a `review` or `manual` finding. It shows
+   the exact change and confirms per-finding.
+2. **Claude allowlist.** Scoped to read-only observe + report under `dontAsk`, so a
+   headless loop *cannot* invoke a mutating command — it auto-denies and fails loud.
+3. **OS sudoers.** Grants the `watchman` user only the read/observe commands the skills
+   declared — never a mutating one, never a blanket `ALL`.
+
+`bypassPermissions` is never used. Remediation only ever happens when **you** run
+`watchman fix`.
+
+## What it watches
+
+| | Server | Workstation |
+|---|--------|-------------|
+| Looks for | Inbound attack surface — exposed ports, web headers, CORS, SSH hardening, probes | What the machine talks *to* — new outbound connections vs. a baseline |
+| Top concern | Public-facing exposure | **Log retention** — volatile journald loses the forensic trail on reboot |
+| Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity | |
+
+## Distro support
+
+Skills stay distro-blind; one resolver knows the differences.
+
+| | Debian / Ubuntu | RHEL family | Arch |
+|---|---|---|---|
+| Packages | apt / dpkg | dnf / rpm | pacman |
+| Firewall | ufw | firewalld | nftables / ufw |
+| MAC | AppArmor | SELinux | (none by default) |
+| Integrity | debsums | rpm -V | pacman -Qkk |
+
+## What gets committed
+
+Portable product only: `skills/`, `lib/`, `bin/watchman`, `journal/schema.sql`,
+`install.sh`, the `*.example` templates, `.gitignore`, and this README. Anything
+machine-specific or secret — `.env`, `config/watchman.conf`, `journal/findings.db`,
+`.claude/`, `CLAUDE.md` — is gitignored and never leaves the host.
+
+## License
+
+MIT

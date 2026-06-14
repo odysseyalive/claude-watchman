@@ -1,0 +1,8 @@
+{
+  "skill": "inventory-services",
+  "stage": "grammar",
+  "reads": [],
+  "commands": [],
+  "resolver_ops": ["pkg_query", "service_status", "net_connections"],
+  "fixes": []
+}

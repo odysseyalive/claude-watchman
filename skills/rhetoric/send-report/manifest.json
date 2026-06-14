@@ -1,0 +1,10 @@
+{
+  "skill": "send-report",
+  "stage": "rhetoric",
+  "reads": [],
+  "commands": [
+    { "family": "msmtp", "args": "*", "needs_sudo": false }
+  ],
+  "resolver_ops": [],
+  "fixes": []
+}

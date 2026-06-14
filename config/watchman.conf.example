@@ -1,0 +1,28 @@
+# config/watchman.conf.example — committed template.
+#
+# install.sh detects the family/profile and writes the real config/watchman.conf
+# (which is GITIGNORED). This file holds NO secrets — SMTP credentials live only
+# in .env. It is plain shell, sourced by lib/profile.sh and the dispatcher.
+
+# --- Identity ---------------------------------------------------------------
+# Set by install.sh; override here if detection was wrong.
+WATCHMAN_PROFILE=workstation     # server | workstation
+WATCHMAN_FAMILY=                 # debian | rhel | arch  (blank = auto-detect from /etc/os-release)
+WATCHMAN_USER=watchman           # the dedicated system user the tool runs as
+
+# --- Loop thresholds --------------------------------------------------------
+# The loop emails only when the delta crosses these. A quiet machine stays quiet.
+WATCHMAN_NOTIFY_MIN_SEVERITY=high   # email when a NEW finding is >= this severity
+WATCHMAN_NOTIFY_ON_REGRESSION=yes   # always email when a fixed finding REGRESSES
+WATCHMAN_NOTIFY_ON_NEW_OUTBOUND=yes # (workstation) email on new outbound destinations
+
+# --- Capacity baselines -----------------------------------------------------
+WATCHMAN_DISK_WARN_PCT=85           # disk usage % that raises a capacity finding
+WATCHMAN_INODE_WARN_PCT=85
+WATCHMAN_MEM_WARN_PCT=90
+
+# --- Safe-tier auto-remediation (opt-in, off by default) --------------------
+# Even when 'yes', this only matters for the operator-run `watchman fix`. The
+# unattended loop can NEVER apply a fix: its allowlist excludes mutating actions
+# and there is no operator to confirm. review/manual are NEVER auto-applied.
+WATCHMAN_SAFE_AUTOFIX=no

@@ -1,0 +1,8 @@
+{
+  "skill": "baseline-network",
+  "stage": "logic",
+  "reads": [],
+  "commands": [],
+  "resolver_ops": ["net_connections"],
+  "fixes": []
+}

@@ -1,0 +1,14 @@
+{
+  "skill": "fix-redflag",
+  "stage": "rhetoric",
+  "reads": [],
+  "commands": [],
+  "resolver_ops": [],
+  "fixes": [
+    { "op": "firewall_allow", "risk_tier": "review", "needs_sudo": true },
+    { "op": "firewall_deny",  "risk_tier": "review", "needs_sudo": true },
+    { "op": "service_enable", "risk_tier": "review", "needs_sudo": true },
+    { "op": "service_restart","risk_tier": "review", "needs_sudo": true },
+    { "op": "config_edit",    "risk_tier": "safe",   "needs_sudo": true }
+  ]
+}

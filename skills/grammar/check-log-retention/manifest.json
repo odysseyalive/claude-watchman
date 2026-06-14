@@ -1,0 +1,8 @@
+{
+  "skill": "check-log-retention",
+  "stage": "grammar",
+  "reads": ["/etc/systemd/journald.conf", "/etc/logrotate.conf", "/etc/logrotate.d"],
+  "commands": [],
+  "resolver_ops": ["journal_read", "service_status"],
+  "fixes": []
+}
