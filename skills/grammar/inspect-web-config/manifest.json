@@ -1,0 +1,8 @@
+{
+  "skill": "inspect-web-config",
+  "stage": "grammar",
+  "reads": ["webserver_config_roots"],
+  "commands": [],
+  "resolver_ops": [],
+  "fixes": []
+}

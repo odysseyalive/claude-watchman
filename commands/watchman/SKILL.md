@@ -34,8 +34,8 @@ verbs and stop.
 
 1. Execute each OBSERVE skill in order, following its `SKILL.md` exactly:
    `skills/grammar/audit-system`, `skills/grammar/inventory-services`,
-   `skills/grammar/inspect-logs`, `skills/grammar/check-log-retention`,
-   `skills/grammar/check-capacity`.
+   `skills/grammar/inspect-web-config`, `skills/grammar/inspect-logs`,
+   `skills/grammar/check-log-retention`, `skills/grammar/check-capacity`.
 2. Then each ANALYZE skill: `skills/logic/diagnose-crash`,
    `skills/logic/baseline-network`, `skills/logic/correlate-findings`,
    `skills/logic/prioritize-redflags`.
