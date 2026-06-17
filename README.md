@@ -18,6 +18,13 @@ It drives proven tools (Lynis, CrowdSec, journald, your distro's own integrity
 verifier) and layers on a durable journal, plain-language explanations, and the
 judgment to tell a new problem from old news.
 
+> **Bonus: privacy-respecting web analytics, no trackers.** Your web server already
+> keeps access logs for security. claude-watchman turns them into a decent traffic
+> report — page views, unique visitors, top pages, referrers, bots-vs-humans — with
+> **no Google Analytics, no cookies, no JavaScript, no third parties**. IPs are
+> correlated in memory only and never stored or shown, so it's a GDPR-friendly stand-in
+> for the analytics you can't run compliantly. Run `/watchman stats`. [More →](#web-analytics-without-the-trackers)
+
 ## How it works
 
 One cycle, running at different speeds. The journal in the middle is what lets the
@@ -109,6 +116,7 @@ so their token use is always in front of you.
 | `/watchman loop` | One pass: observe → journal → delta → email if it matters. |
 | `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. |
 | `/watchman inventory` | What's installed and how it serves. |
+| `/watchman stats` | Privacy-respecting web traffic analytics from access logs. On demand, not the loop. |
 
 `fix` is the only verb that ever changes the system, and it's always interactive. It
 shows you the exact change, asks before applying anything risky, and never touches a
@@ -168,6 +176,29 @@ deny base beneath them:
 | Looks for | Inbound attack surface — exposed ports, web headers, CORS, SSH hardening, probes | What the machine talks *to* — new outbound connections vs. a baseline |
 | Top concern | Public-facing exposure | **Log retention** — volatile journald loses the forensic trail on reboot |
 | Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity | |
+
+## Web analytics, without the trackers
+
+You can't run Google Analytics GDPR-cleanly, and most privacy-first tools still want
+JavaScript and a third-party service. But your web server already writes an access log
+for every request — kept for security — and that log holds everything a traffic report
+needs. `/watchman stats` reads it and prints:
+
+- **page views** and **unique visitors** (deduplicated, so one person reloading doesn't
+  skew the numbers), **top pages by unique visitor**, **referrers**, **status-code mix**,
+  **bots-vs-humans**, and a **daily trend**.
+
+The privacy posture is the feature: the client IP is used **only in memory** to correlate
+a visitor's requests, then discarded — it is never stored, never hashed-and-kept, never
+shown. The report is pure anonymous aggregates, computed on your own box, with **no
+cookies, no JavaScript, no third party, and nothing leaving the host**. It reads current
+and rotated logs (including `.gz`), and breaks down per site when you serve several.
+
+Run it on demand — it is deliberately **not** part of the monitoring loop:
+
+```
+/watchman stats
+```
 
 ## Distro support
 

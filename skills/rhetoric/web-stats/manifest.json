@@ -1,0 +1,8 @@
+{
+  "skill": "web-stats",
+  "stage": "rhetoric",
+  "reads": ["webserver_log_paths"],
+  "commands": [],
+  "resolver_ops": [],
+  "fixes": []
+}

@@ -27,6 +27,7 @@ lib/profile.sh
 lib/selfcheck.sh
 lib/smtp.sh
 lib/update.sh
+lib/webstats.sh
 README.md
 skills/grammar/audit-system/manifest.json
 skills/grammar/audit-system/SKILL.md
@@ -55,3 +56,5 @@ skills/rhetoric/report-status/manifest.json
 skills/rhetoric/report-status/SKILL.md
 skills/rhetoric/send-report/manifest.json
 skills/rhetoric/send-report/SKILL.md
+skills/rhetoric/web-stats/manifest.json
+skills/rhetoric/web-stats/SKILL.md

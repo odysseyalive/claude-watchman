@@ -1,6 +1,6 @@
 ---
 name: watchman
-description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | loop | fix | inventory. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
+description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | loop | fix | inventory | stats. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write
 ---
@@ -23,10 +23,10 @@ session, so you always see what they do and what they spend. (The zero-token plu
 ## How to invoke
 
 The verb arrives as this skill's argument: `/watchman audit`, `/watchman report`,
-`/watchman loop`, `/watchman fix`, `/watchman inventory`. Run from the claude-watchman
-repo root (paths below are relative to it). Journal every finding **only** through
-`lib/journal.sh` — never touch `findings.db` directly. If no verb is given, list the
-verbs and stop.
+`/watchman loop`, `/watchman fix`, `/watchman inventory`, `/watchman stats`. Run from the
+claude-watchman repo root (paths below are relative to it). Journal every finding **only**
+through `lib/journal.sh` — never touch `findings.db` directly. If no verb is given, list
+the verbs and stop.
 
 ---
 
@@ -78,3 +78,12 @@ Directive's stop-warn-ask gate governs every destructive action.
 Execute `skills/grammar/inventory-services/SKILL.md` exactly and report what is installed
 and how it serves (web server, database, php-fpm, etc.). Journal findings only through
 `lib/journal.sh`. Observe only — no changes.
+
+## stats — Privacy-respecting web traffic analytics (on demand, NOT the loop)
+
+Execute `skills/rhetoric/web-stats/SKILL.md` exactly: a GDPR-friendly traffic report built
+from the server's own access logs — page views, unique visitors, top pages by unique
+visitor (dedup'd so reloads don't skew), referrers, status mix, bots-vs-humans, daily
+trend. IPs are correlated **in memory only** and never stored or shown; the report is pure
+anonymous aggregates. Read-only — no findings, no config, no firewall. This is an
+operator-run feature: it is **never** part of the audit or loop.
