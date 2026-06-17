@@ -61,16 +61,33 @@ selfcheck_run() {
 
     # --- dependencies (degradation map) ------------------------------------
     _hdr "3. Dependencies"
-    local b
+    local b miss=() cscli_aur=no
     for b in sqlite3 jq; do
-        command -v "$b" >/dev/null 2>&1 && _ok "$b present (required)" || _fail "$b MISSING — required; install via install.sh"
+        if command -v "$b" >/dev/null 2>&1; then _ok "$b present (required)"
+        else _fail "$b MISSING — required"; miss+=("$(pkg_for_cmd "$b")"); fi
     done
     for b in journalctl ss df free; do
         command -v "$b" >/dev/null 2>&1 && _ok "$b present" || _warn "$b missing — some observe checks degrade"
     done
-    command -v lynis >/dev/null 2>&1 && _ok "lynis present (audit-system)" || _warn "lynis missing — audit-system degrades until installed"
-    command -v msmtp >/dev/null 2>&1 && _ok "msmtp present (send-report)" || _warn "msmtp missing — mail dispatch disabled"
-    command -v cscli >/dev/null 2>&1 && _ok "cscli present (crowdsec)" || _warn "cscli missing — inspect-logs falls back to log scan (AUR on Arch)"
+    command -v lynis >/dev/null 2>&1 && _ok "lynis present (audit-system)" \
+        || { _warn "lynis missing — audit-system degrades until installed"; miss+=(lynis); }
+    command -v msmtp >/dev/null 2>&1 && _ok "msmtp present (send-report)" \
+        || { _warn "msmtp missing — mail dispatch disabled"; miss+=(msmtp); }
+    if command -v cscli >/dev/null 2>&1; then _ok "cscli present (crowdsec)"
+    elif [[ "$(watchman_family)" == arch ]]; then _warn "cscli missing — inspect-logs falls back to log scan (crowdsec is AUR-only on Arch)"; cscli_aur=yes
+    else _warn "cscli missing — inspect-logs falls back to log scan"; miss+=(crowdsec); fi
+
+    # Direct the operator to install what's missing (selfcheck never installs — it tells you).
+    if (( ${#miss[@]} )) || [[ "$cscli_aur" == yes ]]; then
+        local ic uniq; ic="$(pkg_install_cmd)"
+        printf '\n  \033[1;33m[ →  ]\033[0m install the missing packages:\n'
+        if (( ${#miss[@]} )); then
+            uniq="$(printf '%s\n' "${miss[@]}" | awk 'NF && !s[$0]++' | paste -sd' ' -)"
+            if [[ -n "$ic" ]]; then printf '        %s %s\n' "$ic" "$uniq"
+            else printf '        (use your package manager) %s\n' "$uniq"; fi
+        fi
+        [[ "$cscli_aur" == yes ]] && printf '        crowdsec: AUR-only on Arch — install with your AUR helper (e.g. yay -S crowdsec)\n'
+    fi
 
     # --- journal: real DB status + scratch roundtrip -----------------------
     _hdr "4. Journal"

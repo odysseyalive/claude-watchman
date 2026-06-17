@@ -64,18 +64,37 @@ dependencies, and permissions all work on this box before you trust anything els
 watchman selfcheck
 ```
 
-**2. Run your first audit, in a session.** `audit` and `report` are AI features, so you
-run them *inside* Claude Code — where you watch the work and the token meter. Launch a
-session as root (run `/login` once if needed):
+**2. Launch Claude Code — this is its own step.** The `audit`, `report`, `fix`,
+`inventory`, and `stats` features are AI-driven, so they run *inside* a Claude Code
+session (where you watch the work and the token meter), **not** from the shell. Open a
+session, as root:
 
 ```bash
 claude
 ```
 
-Then, inside that session, run `/watchman audit` (observe + analyze, journal findings),
-followed by `/watchman report` (a plain-language summary).
+The first time, type `/login` at the Claude prompt to authenticate (it remembers you
+after). You are now **inside the session**, at Claude Code's own prompt — this is the only
+place the `/watchman` slash-commands work.
 
-**3. Turn on recurring monitoring.** Keep the loop in a tmux session so it persists but
+**3. Run your first audit — from inside that session.** At the Claude prompt, type:
+
+```
+/watchman audit
+```
+
+It observes and analyzes the machine and journals what it finds (no changes). Then ask for
+a plain-language summary:
+
+```
+/watchman report
+```
+
+That's the whole loop: launch `claude` once, then drive it with `/watchman …` commands.
+(If you type `watchman audit` at your **shell** by mistake, it will point you back here —
+the slash-command form, inside `claude`, is the one that runs.)
+
+**4. Turn on recurring monitoring.** Keep the loop in a tmux session so it persists but
 stays visible. Start a persistent session:
 
 ```bash

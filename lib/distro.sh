@@ -71,6 +71,27 @@ pkg_install() {
     esac
 }
 
+# NON-mutating: echo the install command for THIS family (no -y/--noconfirm — it is
+# shown to the operator to run, not executed). Used by selfcheck to direct the user.
+pkg_install_cmd() {
+    case "$(watchman_family)" in
+        debian) echo "sudo apt-get install" ;;
+        rhel)   echo "sudo dnf install" ;;
+        arch)   echo "sudo pacman -S" ;;
+        *) echo "" ;;
+    esac
+}
+
+# NON-mutating: echo the package name for a command on THIS family (names diverge:
+# sqlite3 -> sqlite on Arch; cscli ships in the crowdsec package).
+pkg_for_cmd() {
+    case "$1:$(watchman_family)" in
+        sqlite3:arch) echo sqlite ;;
+        cscli:*)      echo crowdsec ;;
+        *)            echo "$1" ;;
+    esac
+}
+
 pkg_list_installed() {
     case "$(watchman_family)" in
         debian) dpkg-query -W -f='${Package}\n' 2>/dev/null ;;
