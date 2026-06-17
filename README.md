@@ -35,23 +35,19 @@ can raise is a **regression**: something you fixed that came back.
 
 ## Install
 
-**Remote (one line)** — fetches the project and runs the installer. Use the
-`bash -c "$(...)"` form so the prompts keep your terminal:
+**No `git clone` needed.** Make a directory for claude-watchman and run the installer
+from inside it — it fetches the project file-by-file from a manifest into that directory.
+Use the `bash -c "$(...)"` form so the prompts keep your terminal:
 
 ```bash
+mkdir watchman && cd watchman
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
-```
-
-**Or from a local checkout:**
-
-```bash
-bash install.sh
 ```
 
 Run it as root. It detects your distro and profile, installs dependencies, sets up the
 journal and config, and generates the Claude permission allowlist. Every privileged
 step asks first. There's no service user to create — claude-watchman runs as root and
-reads your logs directly.
+reads your logs directly. **The same command installs and updates** — see Updating.
 
 ## Quick start
 
@@ -90,7 +86,7 @@ Re-attach with `tmux attach -t watchman` whenever you want to see what it's doin
 
 ## Commands
 
-claude-watchman splits its verbs on the token line. The two that spend nothing are
+claude-watchman splits its verbs on the token line. The ones that spend nothing are
 shell commands; the AI features run inside a Claude Code session as `/watchman <verb>`,
 so their token use is always in front of you.
 
@@ -100,6 +96,7 @@ so their token use is always in front of you.
 |---------|--------------|
 | `watchman selfcheck` | Bash-only plumbing check. Run first on any new host. |
 | `watchman preflight` | Regenerate the Claude allowlist + the in-session `/watchman` command. |
+| `watchman update` | Re-fetch the latest product (manifest, no git) + regenerate locals. Same as installing. |
 
 **In a Claude Code session** — AI features, visible token use:
 
@@ -179,12 +176,39 @@ Skills stay distro-blind; one resolver knows the differences.
 | MAC | AppArmor | SELinux | (none by default) |
 | Integrity | debsums | rpm -V | pacman -Qkk |
 
+## Updating
+
+**Updating is the same command as installing** — re-run it from your watchman directory,
+or use the verb:
+
+```bash
+watchman update
+```
+
+Both re-fetch the latest product from the manifest into your directory, then regenerate
+the local artifacts (the permission allowlist and the in-session `/watchman` command) and
+run any additive journal migration. It is **safe by construction**: the manifest lists
+only the portable product, so a re-fetch overwrites code files and **never touches your
+machine-specific state** — `.env`, `config/watchman.conf`, `journal/findings.db` aren't in
+the manifest. The fetch is atomic (everything downloads to a temp dir and moves into place
+only if all files succeed), so a dropped connection can't leave you half-updated. A lossy
+schema migration would stop and ask (the Prime Directive). No `git` is involved — none of
+the clone/pull/divergence failure modes apply.
+
+Maintainers: `watchman update --check` is a release-readiness guard — run it (in the git
+repo, after `git add`) before committing a feature. It asserts the update story still
+holds: every machine artifact is gitignored and untracked, **`manifest.txt` lists exactly
+the tracked product** (so a new skill can't silently fail to ship), every skill carries the
+Prime Directive, every observe/analyze skill is wired into the `/watchman` orchestration,
+and the journal schema version is in sync.
+
 ## What gets committed
 
 Portable product only: `skills/`, `commands/`, `lib/`, `bin/watchman`,
-`journal/schema.sql`, `install.sh`, the `*.example` templates, `.gitignore`, and this
-README. Anything machine-specific or secret — `.env`, `config/watchman.conf`,
-`journal/findings.db`, `.claude/`, `CLAUDE.md` — is gitignored and never leaves the host.
+`journal/schema.sql`, `install.sh`, `manifest.txt`, the `*.example` templates,
+`.gitignore`, and this README. Anything machine-specific or secret — `.env`,
+`config/watchman.conf`, `journal/findings.db`, `.claude/`, `CLAUDE.md` — is gitignored and
+never leaves the host.
 
 ## License
 

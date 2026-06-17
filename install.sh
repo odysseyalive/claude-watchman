@@ -15,19 +15,33 @@
 # > nothing DESTRUCTIVE: it never deletes user data, never overwrites .env or an
 # > existing watchman.conf, never stops/removes services.
 #
+# Install AND update are the same command — no git clone. The installer fetches
+# every file in manifest.txt from raw.githubusercontent INTO THE CURRENT DIRECTORY,
+# so the operator makes a directory and runs it from inside (re-running updates).
+#
 # Usage (run as root, or via sudo):
-#   Local checkout:   bash install.sh [--profile server|workstation] [--yes]
-#   Remote one-liner: bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
+#   Install/update:   mkdir watchman && cd watchman
+#                     bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
 #                     (use the bash -c "$(...)" form, NOT `curl | bash`, so the
 #                      interactive prompts keep the terminal as stdin.)
-#   Overridable:      WATCHMAN_REPO=<git url> WATCHMAN_REF=<branch> WATCHMAN_DIR=<dest> ...
+#   Dev checkout:     bash install.sh [--profile server|workstation] [--yes]   (uses local files, no fetch)
+#   Force re-fetch:   bash install.sh --update                                 (what `watchman update` runs)
+#   Overridable:      WATCHMAN_RAW=<raw base url> WATCHMAN_REF=<branch>
 
 set -euo pipefail
 
-WATCHMAN_REPO="${WATCHMAN_REPO:-https://github.com/odysseyalive/claude-watchman}"
 WATCHMAN_REF="${WATCHMAN_REF:-main}"
+# Raw base for the manifest-driven fetch — NO git clone. Files are pulled from
+# raw.githubusercontent into the install directory. Overridable for forks/mirrors.
+WATCHMAN_RAW="${WATCHMAN_RAW:-https://raw.githubusercontent.com/odysseyalive/claude-watchman/$WATCHMAN_REF}"
 
-# Resolve our own location. Empty when piped/curled (no script file on disk).
+# Early flag scan: the fetch decision below must know --update before the full
+# argument parse (which only runs once the libs are present).
+FORCE_FETCH=no
+for _a in "$@"; do [[ "$_a" == "--update" ]] && FORCE_FETCH=yes; done
+
+# Resolve our own location. Empty when piped/curled (no script file on disk) —
+# then the install directory is simply the current directory the operator chose.
 _self="${BASH_SOURCE[0]:-}"
 if [[ -n "$_self" && -f "$_self" ]]; then
     ROOT="$(cd "$(dirname "$_self")" && pwd)"
@@ -35,30 +49,49 @@ else
     ROOT="$PWD"
 fi
 
-# --- Remote bootstrap -------------------------------------------------------
-# When this script runs DETACHED from the repo (its sibling lib/ is absent — the
-# curl one-liner case), fetch the project, then re-exec the real installer from
-# the fetched copy. A normal checkout has lib/ present and skips straight past this.
-if [[ ! -f "$ROOT/lib/distro.sh" ]]; then
-    dest="${WATCHMAN_DIR:-$PWD/claude-watchman}"
-    echo "==> claude-watchman remote install → $dest" >&2
-    if [[ -f "$dest/lib/distro.sh" ]]; then
-        echo "    using existing copy at $dest" >&2
-    elif command -v git >/dev/null 2>&1; then
-        git clone --depth 1 --branch "$WATCHMAN_REF" "$WATCHMAN_REPO" "$dest" \
-            || { echo "install: git clone failed from $WATCHMAN_REPO ($WATCHMAN_REF)" >&2; exit 1; }
-    elif command -v curl >/dev/null 2>&1; then
-        mkdir -p "$dest"
-        # GitHub tarball nests under <repo>-<ref>/ — strip that top component.
-        curl -fsSL "$WATCHMAN_REPO/archive/refs/heads/$WATCHMAN_REF.tar.gz" \
-            | tar xz -C "$dest" --strip-components=1 \
-            || { echo "install: tarball fetch failed from $WATCHMAN_REPO ($WATCHMAN_REF)" >&2; exit 1; }
-    else
-        echo "install: need git or curl to fetch claude-watchman" >&2; exit 1
-    fi
-    echo "==> running installer from $dest" >&2
-    cd "$dest" || { echo "install: cannot enter $dest" >&2; exit 1; }
-    exec bash install.sh "$@"
+# --- Manifest-driven fetch (NO git) -----------------------------------------
+# Self-contained (it bootstraps the first install, before any lib/ exists on
+# disk). Fetches every path in manifest.txt from WATCHMAN_RAW into $1, ATOMICALLY:
+# everything lands in a temp dir first and is moved into place only after ALL
+# files succeed, so a dropped connection can never leave a half-updated tree.
+# `keep`-flagged files are fetched only if absent; `hook` files get +x.
+_watchman_fetch() {
+    local dest="$1" tmp line flag path
+    command -v curl >/dev/null 2>&1 || { echo "install: curl is required to fetch claude-watchman." >&2; exit 1; }
+    tmp="$(mktemp -d)" || { echo "install: mktemp failed." >&2; exit 1; }
+    echo "==> fetching claude-watchman ($WATCHMAN_REF) → $dest" >&2
+    curl -fsSL "$WATCHMAN_RAW/manifest.txt" -o "$tmp/manifest.txt" \
+        || { echo "install: could not fetch manifest.txt from $WATCHMAN_RAW" >&2; rm -rf "$tmp"; exit 1; }
+    # Phase 1 — fetch everything into the temp tree (nothing touches dest yet).
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|\#*) continue ;; esac
+        flag=""; path="$line"
+        case "$line" in "keep "*) flag=keep; path="${line#keep }" ;; "hook "*) flag=hook; path="${line#hook }" ;; esac
+        if [ "$flag" = keep ] && [ -f "$dest/$path" ]; then continue; fi
+        mkdir -p "$tmp/$(dirname "$path")"
+        curl -fsSL "$WATCHMAN_RAW/$path" -o "$tmp/$path" \
+            || { echo "install: fetch failed for $path" >&2; rm -rf "$tmp"; exit 1; }
+    done < "$tmp/manifest.txt"
+    # Phase 2 — move into place (only now), and keep the manifest on disk so
+    # `watchman update --check` can verify it stays in lockstep with the product.
+    cp "$tmp/manifest.txt" "$dest/manifest.txt"
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|\#*) continue ;; esac
+        flag=""; path="$line"
+        case "$line" in "keep "*) flag=keep; path="${line#keep }" ;; "hook "*) flag=hook; path="${line#hook }" ;; esac
+        [ -f "$tmp/$path" ] || continue            # keep-skipped file
+        mkdir -p "$dest/$(dirname "$path")"
+        mv -f "$tmp/$path" "$dest/$path"
+        [ "$flag" = hook ] && chmod +x "$dest/$path"
+    done < "$tmp/manifest.txt"
+    rm -rf "$tmp"
+}
+
+# Fetch when running detached (the curl one-liner, no lib/ yet) OR on --update
+# (re-run from an installed dir to pull the latest). A plain re-run from a dev
+# checkout (lib/ present, no --update) skips the fetch and uses local files.
+if [[ ! -f "$ROOT/lib/distro.sh" || "$FORCE_FETCH" == yes ]]; then
+    _watchman_fetch "$ROOT"
 fi
 
 export WATCHMAN_ROOT="$ROOT"
@@ -69,7 +102,8 @@ ASSUME_YES=no
 PROFILE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --yes|-y) ASSUME_YES=yes ;;
+        --yes|-y)  ASSUME_YES=yes ;;
+        --update)  ASSUME_YES=yes ;;   # update is non-interactive (handled above)
         --profile) PROFILE="$2"; shift ;;
         *) echo "install: unknown arg '$1'" >&2; exit 2 ;;
     esac

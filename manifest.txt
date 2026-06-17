@@ -1,0 +1,57 @@
+# manifest.txt — the shipped file list for claude-watchman.
+#
+# install.sh fetches every path below from the repo (raw.githubusercontent) into
+# the install directory — NO git clone required. Re-running the installer
+# re-fetches them, so install and update are one and the same.
+#
+# Format: an optional flag, then the repo-relative path.
+#   (none)  overwrite on every fetch — this is the portable product.
+#   hook    chmod +x after fetch (executables).
+#   keep    fetch only if absent — preserve a local copy (not used yet).
+#
+# NOT listed here (so a re-fetch never clobbers them): the machine-specific,
+# gitignored artifacts — .env, config/watchman.conf, journal/findings.db,
+# .claude/, CLAUDE.md — and .gitignore (install.sh appends its block idempotently).
+# `watchman update --check` asserts this list stays in lockstep with the product.
+
+hook bin/watchman
+install.sh
+README.md
+.env.example
+config/watchman.conf.example
+journal/schema.sql
+lib/distro.sh
+lib/journal.sh
+lib/preflight.sh
+lib/profile.sh
+lib/selfcheck.sh
+lib/smtp.sh
+lib/update.sh
+commands/watchman/SKILL.md
+skills/MANIFEST.md
+skills/grammar/audit-system/SKILL.md
+skills/grammar/audit-system/manifest.json
+skills/grammar/check-capacity/SKILL.md
+skills/grammar/check-capacity/manifest.json
+skills/grammar/check-log-retention/SKILL.md
+skills/grammar/check-log-retention/manifest.json
+skills/grammar/inspect-logs/SKILL.md
+skills/grammar/inspect-logs/manifest.json
+skills/grammar/inspect-web-config/SKILL.md
+skills/grammar/inspect-web-config/manifest.json
+skills/grammar/inventory-services/SKILL.md
+skills/grammar/inventory-services/manifest.json
+skills/logic/baseline-network/SKILL.md
+skills/logic/baseline-network/manifest.json
+skills/logic/correlate-findings/SKILL.md
+skills/logic/correlate-findings/manifest.json
+skills/logic/diagnose-crash/SKILL.md
+skills/logic/diagnose-crash/manifest.json
+skills/logic/prioritize-redflags/SKILL.md
+skills/logic/prioritize-redflags/manifest.json
+skills/rhetoric/fix-redflag/SKILL.md
+skills/rhetoric/fix-redflag/manifest.json
+skills/rhetoric/report-status/SKILL.md
+skills/rhetoric/report-status/manifest.json
+skills/rhetoric/send-report/SKILL.md
+skills/rhetoric/send-report/manifest.json

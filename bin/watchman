@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# bin/watchman — the operator's SHELL entrypoint. It runs ONLY the two zero-token,
+# bin/watchman — the operator's SHELL entrypoint. It runs ONLY the zero-token,
 # bash-only verbs; the AI features run IN a Claude Code session so token use is
 # visible (CLAUDE.md "How it runs").
 #
 #   watchman selfcheck   Direct bash plumbing check (NO Claude, no tokens).
 #   watchman preflight   Regenerate the Claude allowlist + in-session commands (NO Claude).
+#   watchman update      Re-fetch the latest product (manifest, NO git) + regenerate locals.
+#                        Same as re-running the installer. 'update --check' = maintainer guard.
 #
 # The token-spending operations — audit, report, loop, fix, inventory — are NOT shell
 # verbs. They run inside a Claude Code session as `/watchman <verb>`, where you see the
@@ -36,6 +38,9 @@ watchman — claude-watchman shell CLI. Two zero-token, bash-only verbs:
 
   watchman selfcheck   Direct bash plumbing check (NO Claude) — run this FIRST on any new host.
   watchman preflight   Regenerate the Claude allowlist + in-session command skills (NO Claude).
+  watchman update      Re-fetch the latest product from the manifest (NO git) + regenerate
+                       locals. Same command as installing; never touches your local state.
+                       'watchman update --check' = maintainer release-readiness check.
 
 The AI features run INSIDE a Claude Code session (run `claude` as root, then type):
 
@@ -91,6 +96,14 @@ case "$verb" in
         source "$WATCHMAN_ROOT/lib/preflight.sh"
         preflight_run
         echo "watchman: preflight complete (allowlist + in-session commands regenerated; runs as root, no sudoers)."
+        ;;
+
+    update)
+        # Pure bash — no claude. Re-fetch the product via the manifest (NO git) and
+        # regenerate locals; same as re-running the installer. '--check' = maintainer guard.
+        # shellcheck source=lib/update.sh
+        source "$WATCHMAN_ROOT/lib/update.sh"
+        if [[ "${1:-}" == "--check" ]]; then update_check_run; else update_run; fi
         ;;
 
     audit|report|loop|fix|inventory) _redirect_to_session "$verb" ;;
