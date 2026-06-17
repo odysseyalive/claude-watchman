@@ -38,6 +38,52 @@ update_run() {
     exec bash "$installer" --update
 }
 
+# --- watchman update --sync (regenerate manifest.txt) -----------------------
+# Maintainer helper: rewrite manifest.txt to list exactly the tracked product, so
+# a file you just added/removed under skills/ commands/ lib/ ships (or stops
+# shipping) without a hand-edit. Preserves the comment header and the hook flag on
+# bin/watchman. Run it after `git add`, then `update --check`, then commit.
+update_sync_run() {
+    cd "$WATCHMAN_ROOT" || { echo "update --sync: cannot enter $WATCHMAN_ROOT" >&2; return 1; }
+    if ! command -v git >/dev/null 2>&1 || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "update --sync is a maintainer tool — run it inside the claude-watchman git repo." >&2
+        return 1
+    fi
+    local m="manifest.txt" header new old p added removed
+    # Preserve the leading comment/blank header (machine-format documentation).
+    header=""
+    [[ -f "$m" ]] && header="$(awk 'BEGIN{h=1}
+        h==1 && /^[[:space:]]*#/ {print; next}
+        h==1 && /^[[:space:]]*$/ {print; next}
+        {h=0}' "$m")"
+    [[ -n "$header" ]] || header="# manifest.txt — shipped file list. Regenerate with: watchman update --sync"
+    # The product = tracked files minus .gitignore (install.sh-managed) and the manifest itself.
+    new="$(git ls-files | grep -vE '^(\.gitignore|manifest\.txt)$' | sort -u)"
+    old=""
+    [[ -f "$m" ]] && old="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$m" | sed -E 's/^(keep|hook) //' | sort -u)"
+    # Rewrite (atomic): header, then each path with its flag (only bin/watchman is +x today).
+    {
+        printf '%s\n\n' "$header"   # blank line between header and entries
+        while IFS= read -r p; do
+            [[ -n "$p" ]] || continue
+            case "$p" in
+                bin/watchman) printf 'hook %s\n' "$p" ;;
+                *)            printf '%s\n' "$p" ;;
+            esac
+        done <<< "$new"
+    } > "$m.tmp" && mv -f "$m.tmp" "$m"
+    added="$(comm -13 <(printf '%s\n' "$old") <(printf '%s\n' "$new") | grep -v '^$' || true)"
+    removed="$(comm -23 <(printf '%s\n' "$old") <(printf '%s\n' "$new") | grep -v '^$' || true)"
+    if [[ -z "$added" && -z "$removed" ]]; then
+        echo "update --sync: manifest.txt already in sync ($(printf '%s\n' "$new" | grep -c .) files)."
+    else
+        echo "update --sync: regenerated manifest.txt ($(printf '%s\n' "$new" | grep -c .) files)."
+        [[ -n "$added" ]]   && { echo "  + now shipped:";   sed 's/^/      /' <<< "$added"; }
+        [[ -n "$removed" ]] && { echo "  - no longer shipped:"; sed 's/^/      /' <<< "$removed"; }
+        echo "Re-stage manifest.txt, run 'watchman update --check', then commit."
+    fi
+}
+
 # --- watchman update --check (maintainer release-readiness) -----------------
 # Deterministic guard for the maintainer: keeps the update story correct as
 # features are added. Run it in the git repo before committing a new feature.
@@ -83,6 +129,7 @@ update_check_run() {
         else
             [[ -n "$missing" ]] && _uc_fail "in product but NOT in manifest.txt (won't ship to users):"$'\n'"$missing"
             [[ -n "$extra" ]]   && _uc_fail "in manifest.txt but not a tracked file (broken fetch):"$'\n'"$extra"
+            printf '         fix: run '\''watchman update --sync'\'' to regenerate manifest.txt\n'
         fi
     else
         _uc_fail "manifest.txt is missing — the fetch list is gone"

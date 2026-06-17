@@ -199,8 +199,9 @@ only if all files succeed), so a dropped connection can't leave you half-updated
 schema migration would stop and ask (the Prime Directive). No `git` is involved — none of
 the clone/pull/divergence failure modes apply.
 
-Maintainers: `watchman update --check` is a release-readiness guard — run it (in the git
-repo, after `git add`) before committing a feature. It asserts the update story still
+Maintainers: after adding or removing a product file, run `watchman update --sync` to
+regenerate `manifest.txt` from the tracked product, then `watchman update --check` (in the
+git repo, after `git add`) before committing. The check asserts the update story still
 holds: every machine artifact is gitignored and untracked, **`manifest.txt` lists exactly
 the tracked product** (so a new skill can't silently fail to ship), every skill carries the
 Prime Directive, every observe/analyze skill is wired into the `/watchman` orchestration,

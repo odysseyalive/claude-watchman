@@ -40,7 +40,8 @@ watchman — claude-watchman shell CLI. Two zero-token, bash-only verbs:
   watchman preflight   Regenerate the Claude allowlist + in-session command skills (NO Claude).
   watchman update      Re-fetch the latest product from the manifest (NO git) + regenerate
                        locals. Same command as installing; never touches your local state.
-                       'watchman update --check' = maintainer release-readiness check.
+                       Maintainer subflags: '--check' = release-readiness guard;
+                       '--sync' = regenerate manifest.txt from the tracked product.
 
 The AI features run INSIDE a Claude Code session (run `claude` as root, then type):
 
@@ -100,10 +101,15 @@ case "$verb" in
 
     update)
         # Pure bash — no claude. Re-fetch the product via the manifest (NO git) and
-        # regenerate locals; same as re-running the installer. '--check' = maintainer guard.
+        # regenerate locals; same as re-running the installer. Maintainer subflags:
+        # '--check' = release-readiness guard; '--sync' = regenerate manifest.txt.
         # shellcheck source=lib/update.sh
         source "$WATCHMAN_ROOT/lib/update.sh"
-        if [[ "${1:-}" == "--check" ]]; then update_check_run; else update_run; fi
+        case "${1:-}" in
+            --check) update_check_run ;;
+            --sync)  update_sync_run ;;
+            *)       update_run ;;
+        esac
         ;;
 
     audit|report|loop|fix|inventory) _redirect_to_session "$verb" ;;
