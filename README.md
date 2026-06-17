@@ -9,16 +9,14 @@
 > stops a service happens without stopping to ask you first. The unattended loop has
 > no one to ask — so it physically cannot reach a destructive step. [How that's enforced →](#safety--three-seatbelts)
 
-Most monitoring tools drown you in noise or need a whole stack to run. claude-watchman
-is the opposite: it's a set of Claude Code **skills** that run a simple loop — look at
-the machine, write down what's wrong, and help you fix it — and it only reaches out
-when the picture changes. It runs on Debian/Ubuntu, RHEL-family, and Arch, and adapts
-to whether the box is a public **server** or a personal **workstation**.
+claude-watchman is a set of Claude Code skills that run one loop: look at the machine,
+write down what's wrong, help you fix it. It only reaches out when the picture changes.
+It runs on Debian/Ubuntu, RHEL-family, and Arch, and adapts to whether the box is a
+public **server** or a personal **workstation**.
 
-It doesn't reinvent the wheel. It drives battle-tested tools — **Lynis**, **CrowdSec**,
-**journald**, your distro's own integrity verifier — and adds the part they're missing:
-a durable journal, plain-language explanations, and the judgment to tell a new problem
-from old news.
+It drives proven tools (Lynis, CrowdSec, journald, your distro's own integrity
+verifier) and layers on a durable journal, plain-language explanations, and the
+judgment to tell a new problem from old news.
 
 ## How it works
 
@@ -50,10 +48,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watc
 bash install.sh
 ```
 
-It detects your distro and profile, installs dependencies, creates a dedicated
-`watchman` user with a tightly-scoped sudoers file, sets up the journal and config,
-generates the permission allowlist, and links the `watchman` command. It's interactive
-and asks before each privileged step — nothing destructive happens silently.
+It detects your distro and profile, creates a dedicated `watchman` user with scoped
+sudoers, and generates the permission allowlists. Every privileged step asks first.
 
 ## Quick start
 
@@ -70,8 +66,8 @@ watchman selfcheck
 watchman audit && watchman report
 ```
 
-**3. Turn on recurring monitoring.** Cadence is Claude Code's built-in `/loop` — there's
-no cron or systemd timer to manage. Type this inside a Claude Code session:
+**3. Turn on recurring monitoring.** Cadence is Claude Code's built-in `/loop`.
+Type this inside a Claude Code session:
 
 ```
 /loop 30m watchman loop
@@ -112,8 +108,8 @@ firewall rule or SSH config without showing the rule first.
 
 ## Running it
 
-Auth is just **Claude Code's own login** — claude-watchman runs *inside* Claude Code and
-uses the login of whoever runs it. There are no API keys or token files anywhere.
+Auth is Claude Code's own login. claude-watchman runs *inside* Claude Code and uses
+the session of whoever starts it.
 
 **Supervised** (recommended; required for `fix`) — run as yourself in an authenticated
 Claude Code session. Your existing login is used. Nothing to set up.
