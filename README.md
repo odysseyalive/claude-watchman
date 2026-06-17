@@ -153,11 +153,16 @@ Inside it, launch Claude as root (`claude`, run `/login` once), then start the l
 
 Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
 
-**It won't take down a busy server.** The heavy reads (integrity verification, full log
-scans, Lynis, journald walks) run at idle I/O and lowest CPU priority, and are **skipped
-when the box is already under load** — the loop records "deferred — system busy" and
-retries next pass instead of piling diagnostic I/O onto a strained machine. Tune the
-thresholds (`WATCHMAN_IO_GUARD_LOAD`, etc.) in `config/watchman.conf`.
+**It won't take down a busy server — and it knows its own footprint.** The heavy reads
+(integrity verification, full log scans, Lynis, journald walks) run at a priority set by
+its **role**, and are **skipped when the box is under real I/O pressure** — measured by
+the kernel's `/proc/pressure/io` (PSI) where available, not just a load average — with the
+loop recording "deferred — system busy" and retrying next pass. It also **measures what it
+itself costs** per check (time, and I/O where GNU `time` is present) and flags a check that
+gets expensive. Set the **role** in `config/watchman.conf`: `WATCHMAN_PRIORITY=guest` (yield
+to everything, the default), `peer`, or `priority` — the last for a **dedicated monitoring
+box where claude-watchman is the critical workload** and should keep running rather than
+defer. Thresholds (`WATCHMAN_IO_GUARD_PSI`, `WATCHMAN_CHECK_TIME_BUDGET`, …) are tunable.
 
 ## Safety — two seatbelts and a backstop
 

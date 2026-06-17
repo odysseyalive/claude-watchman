@@ -23,14 +23,19 @@ WATCHMAN_MEM_WARN_PCT=90
 
 # --- I/O courtesy (never degrade a busy server) -----------------------------
 # claude-watchman's heavy reads (integrity verify, full log scans, Lynis, journald
-# walks) run at idle I/O + lowest CPU priority, and are SKIPPED ("deferred") when
-# the box is already under load — so a diagnostic can never take a high-use server
-# down. See lib/io-courtesy.sh.
-WATCHMAN_IONICE=yes                 # run heavy commands via ionice -c3 + nice -n19
-WATCHMAN_IO_TIMEOUT=300             # wall-clock cap (seconds) on a heavy command
-WATCHMAN_IO_GUARD=yes               # defer heavy diagnostics when the box is busy
-WATCHMAN_IO_GUARD_LOAD=1.5          # per-core 1-min load above which to defer
-WATCHMAN_IO_GUARD_MEM_PCT=10        # defer when available memory drops below this %
+# walks) run at a priority set by its ROLE, and are SKIPPED ("deferred") when the box
+# is under real I/O pressure (measured by the kernel's /proc/pressure/io PSI where
+# available, else per-core load). It also records its OWN cost per check. So a
+# diagnostic can never take a high-use server down — yet on a dedicated monitor it
+# can be told to keep running. See lib/io-courtesy.sh.
+WATCHMAN_PRIORITY=guest            # guest (yield to everything) | peer | priority (claude-watchman is the critical workload)
+WATCHMAN_IONICE=yes                # apply the role's ionice/nice priority to heavy commands
+WATCHMAN_IO_TIMEOUT=300            # wall-clock cap (seconds) on a heavy command
+WATCHMAN_IO_GUARD=yes              # defer heavy diagnostics when the box is under pressure
+WATCHMAN_IO_GUARD_PSI=20           # defer when /proc/pressure/io 'some avg10' exceeds this % (PSI kernels; scaled by role)
+WATCHMAN_IO_GUARD_LOAD=1.5         # per-core 1-min load to defer at when PSI is unavailable
+WATCHMAN_IO_GUARD_MEM_PCT=10       # defer when available memory drops below this %
+WATCHMAN_CHECK_TIME_BUDGET=120     # a check taking longer than this (s) is flagged as expensive (self-footprint)
 
 # --- Inbound rate / DDoS detection (server) ---------------------------------
 # inspect-logs flags a single source IP whose PEAK requests-in-one-minute (from

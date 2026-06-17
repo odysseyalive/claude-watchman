@@ -35,11 +35,19 @@ hardening picture and track the Lynis hardening index as a trend.
    `risk_tier=safe`, `check_id=diagnostic_deferred`, `target=audit-system` finding with
    detail `"deferred: $(io_pressure_reason)"`, then SKIP the Lynis run this pass (retry
    next pass). Do NOT pile heavy I/O onto an already-loaded box.
-2. **Run Lynis** (read-only system audit), at idle priority via `io_run`:
-   `io_run sudo lynis audit system --quiet --no-colors`. Lynis writes machine-readable
+2. **Run Lynis** (read-only system audit) through `io_measure`, which both prices it at
+   the role's I/O priority AND records what it cost:
+   `io_measure sudo lynis audit system --quiet --no-colors`. Lynis writes machine-readable
    results to `$(log_path_lynis)` (`/var/log/lynis-report.dat`). Do not parse human
    stdout — parse the report file. (Any whole-filesystem integrity verification reached
-   through `integrity_verify_all` is already idle-priced when io-courtesy is sourced.)
+   through `integrity_verify_all` is already priced at the role's priority when
+   io-courtesy is sourced.)
+2c. **Self-footprint.** Journal one `category=capacity`, `severity=info`, `risk_tier=safe`,
+   `check_id=self_footprint`, `target=audit-system` finding with detail
+   `"$(io_footprint_summary)"` so the operator (and the loop's trend) can see what
+   claude-watchman itself costs. IF `io_footprint_over_budget`, raise it to `severity=low`
+   and note the check is getting expensive (a cue to enable incremental reads / lengthen
+   its cadence).
 3. **Capture the hardening index** as a tracked metric:
    read `hardening_index=` from the report and
    `journal_record_metric lynis_hardening_index "$value"` so the loop can chart drift.
@@ -61,6 +69,7 @@ hardening picture and track the Lynis hardening index as a trend.
 - `lib/journal.sh` — the only gate to findings.db (`journal_upsert`, `journal_record_metric`).
 - `lib/distro.sh` — `log_path_lynis`, `watchman_family`.
 - `lib/profile.sh` — `profile_severity`, `profile_runs_check`.
-- `lib/io-courtesy.sh` — `io_run`, `io_should_defer_heavy`, `io_pressure_reason` (never
-  degrade a busy server: idle-priced heavy reads, deferral under load).
+- `lib/io-courtesy.sh` — `io_run` / `io_measure` (role-priced heavy reads + self-cost),
+  `io_should_defer_heavy` / `io_pressure_reason` (PSI-based, role-scaled deferral),
+  `io_footprint_summary` / `io_footprint_over_budget`.
 - `manifest.json` — declared permissions (lynis + the report path).
