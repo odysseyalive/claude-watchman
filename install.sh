@@ -101,7 +101,7 @@ _profile_guess() {
     local pub
     pub="$(ss -H -tln 2>/dev/null | awk '{print $4}' \
             | grep -Ev '^127\.|^\[::1\]' \
-            | grep -E ':(22|25|80|443|3306|5432)$' | tr '\n' ' ')"
+            | grep -E ':(22|25|80|443|3306|5432)' | tr '\n' ' ' || true)"
     [[ -n "$pub" ]] && { score=$((score+2)); reasons+=("public listeners: ${pub% }"); }
 
     # A running web server → server-leaning.
@@ -284,20 +284,24 @@ if [[ -f "$STAGED" ]]; then
             warn "Skipped sudoers install — privileged observe checks (lynis, journalctl…) will fail under the loop."
         fi
     else
-        die "Staged sudoers FAILED visudo validation — refusing to install. Inspect $STAGED."
+        warn "Could not validate staged sudoers (sudo auth failed, or syntax error)."
+        warn "Inspect $STAGED and install manually:  sudo install -m 0440 $STAGED /etc/sudoers.d/$WATCHMAN_USER"
     fi
     rm -f "$STAGED"
 fi
 
 # --- 7. Link the CLI --------------------------------------------------------
 LINK=/usr/local/bin/watchman
+chmod +x "$ROOT/bin/watchman"
 if [[ -L "$LINK" || ! -e "$LINK" ]]; then
     say "Linking $LINK -> $ROOT/bin/watchman"
-    $SUDO ln -sfn "$ROOT/bin/watchman" "$LINK"
+    if ! $SUDO ln -sfn "$ROOT/bin/watchman" "$LINK" 2>/dev/null; then
+        warn "Could not create $LINK (needs sudo). Add $ROOT/bin to PATH yourself,"
+        warn "or run:  sudo ln -sfn $ROOT/bin/watchman $LINK"
+    fi
 else
     warn "$LINK exists and is not a symlink — leaving it. Add $ROOT/bin to PATH yourself."
 fi
-chmod +x "$ROOT/bin/watchman"
 
 # --- Done -------------------------------------------------------------------
 cat <<EOF
