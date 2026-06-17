@@ -22,7 +22,7 @@ reboot that followed the failure. Read-only.
 
 ## When to use
 
-Every `watchman audit` / `watchman loop`. On a fresh Arch install several of these
+Every `/watchman audit` / `/watchman loop`. On a fresh Arch install several of these
 often need fixing — surface them clearly.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->

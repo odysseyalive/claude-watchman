@@ -2,7 +2,7 @@
 # lib/selfcheck.sh — prove the plumbing works on THIS host, with NO Claude in the
 # loop. This isolates "does the tool work on this box" (resolvers, journal, deps,
 # permissions, mail, auth, real observe commands) from "does headless Claude
-# execute the skills correctly" — which only `watchman audit` (live) can prove.
+# execute the skills correctly" — which only `/watchman audit` (live) can prove.
 #
 # > PRIME DIRECTIVE. selfcheck is READ-ONLY: it observes and reports, and writes
 # > nothing except a throwaway scratch DB under a temp dir (removed before return).
@@ -138,7 +138,7 @@ selfcheck_run() {
     echo
     echo "  NOTE: selfcheck does NOT exercise the live 'claude -p' → SKILL.md path or"
     echo "        the dontAsk allowlist matching of compound commands. Run a supervised"
-    echo "        'watchman audit' once and read the output to validate that path."
+    echo "        '/watchman audit' once and read the output to validate that path."
     if (( _SC_FAIL > 0 )); then
         printf '\n  \033[1;31mFAIL\033[0m — critical plumbing fault; fix the [FAIL] items before deploying.\n'
         return 1

@@ -23,7 +23,7 @@ delta the loop can detect.
 
 ## When to use
 
-Run once during `watchman audit` to establish the baseline (when none exists), and
+Run once during `/watchman audit` to establish the baseline (when none exists), and
 on operator request to **re-baseline** after intended network changes. The loop
 reads the baseline; it does not rewrite it.
 

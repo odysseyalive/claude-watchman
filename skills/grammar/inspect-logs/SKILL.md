@@ -25,7 +25,7 @@ absent. Read-only.
 
 ## When to use
 
-Every `watchman audit` / `watchman loop`. On a workstation it pairs with
+Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 `baseline-network`: it flags outbound connections to destinations not in the baseline.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->

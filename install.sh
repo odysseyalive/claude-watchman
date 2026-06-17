@@ -257,8 +257,8 @@ say "Initializing journal"
 WATCHMAN_PROFILE="$PROFILE" WATCHMAN_FAMILY="$FAMILY" source "$ROOT/lib/journal.sh"
 journal_init || die "journal init failed"
 
-# --- 5. Preflight: generate the Claude permission allowlist ----------------
-say "Running preflight (generating .claude/settings.local.json)"
+# --- 5. Preflight: allowlist + in-session command skills -------------------
+say "Running preflight (allowlist .claude/settings.local.json + /watchman command skill)"
 WATCHMAN_PROFILE="$PROFILE" WATCHMAN_FAMILY="$FAMILY" \
     bash "$ROOT/lib/preflight.sh"
 
@@ -281,25 +281,28 @@ cat <<EOF
 $(say "claude-watchman installed.")
 
 Next steps (run everything as root):
-  1. VERIFY PLUMBING FIRST (no Claude needed):
+  1. VERIFY PLUMBING FIRST (bash only, no Claude, no tokens):
          watchman selfcheck
   2. Fill in SMTP creds in  $ROOT/.env   (leave SMTP_PASS blank to disable mail)
-  3. First audit (this validates the live claude->skill path):
-         watchman audit && watchman report
+  3. First audit + report — these are AI features, so run them INSIDE a Claude
+     Code session where you can see the work and the token use:
+         claude                # launch Claude Code as root (/login once if needed)
+         /watchman audit       # observe + analyze, journal findings
+         /watchman report      # plain-language summary
 
-Recurring monitoring — run the loop in a tmux session you can re-attach to, so you
+Recurring monitoring — keep the loop in a tmux session you can re-attach to, so you
 always SEE what it does and what tokens it spends (no silent background daemon):
 
-     tmux new -s watchman      # start a persistent session
-     claude                    # launch Claude Code as root (log in once with /login)
-     /loop 30m watchman loop   # start the recurring pass inside that session
-     # Ctrl-b then d           # detach — the loop keeps running, visible on re-attach
-     tmux attach -t watchman   # re-attach any time to watch it / read token use
+     tmux new -s watchman       # start a persistent session
+     claude                     # launch Claude Code as root (/login once)
+     /loop 30m /watchman loop   # start the recurring pass inside that session
+     # Ctrl-b then d            # detach — the loop keeps running, visible on re-attach
+     tmux attach -t watchman    # re-attach any time to watch it / read token use
 
-Auth is Claude Code's own login (no API keys). 'watchman fix' is always interactive —
-run it yourself when you want to remediate.
+Auth is Claude Code's own login (no API keys). '/watchman fix' is always interactive —
+run it in a session when you want to remediate.
 
 Safety: the loop observes and reports only. It can never apply a review/manual fix —
 the dontAsk allowlist forbids mutating actions and the deny base blocks destructive
-commands even as root. Remediation happens only when YOU run 'watchman fix'.
+commands even as root. Remediation happens only when YOU run '/watchman fix'.
 EOF

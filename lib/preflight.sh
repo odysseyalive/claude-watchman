@@ -229,15 +229,39 @@ preflight_write_local_settings() {
     echo "preflight: wrote agent allowlist $target ($(jq '.permissions.allow|length' "$target") allow rules)" >&2
 }
 
+# --- Deploy in-session command skills ---------------------------------------
+# The token-spending operator commands (audit, report, loop, fix, inventory) run
+# IN a Claude Code session so token use is visible — never as headless `claude -p`.
+# Their committed source lives in commands/<name>/SKILL.md; here we copy each into
+# <claude>/skills/ so Claude Code discovers it as the `/<name>` slash command.
+# .claude/ is gitignored, so these are local artifacts regenerated per machine —
+# the same pattern as the allowlist. Refreshed on every preflight to stay in sync
+# with the committed skills they orchestrate.
+preflight_deploy_commands() {
+    local src="$WATCHMAN_ROOT/commands" dst="$WATCHMAN_CLAUDE_DIR/skills"
+    [[ -d "$src" ]] || return 0
+    mkdir -p "$dst"
+    local n=0 d
+    while IFS= read -r d; do
+        [[ -f "$d/SKILL.md" ]] || continue
+        local name; name="$(basename "$d")"
+        mkdir -p "$dst/$name"
+        cp "$d/SKILL.md" "$dst/$name/SKILL.md"
+        n=$((n+1))
+    done < <(find "$src" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    echo "preflight: deployed $n in-session command skill(s) to $dst" >&2
+}
+
 # --- Public entry -----------------------------------------------------------
-# Regenerate the Claude permission allowlist from the manifests. Safe to re-run.
-# No sudoers file: claude-watchman runs as root, which invokes read/observe
-# commands directly (CLAUDE.md "How it runs").
+# Regenerate the Claude permission allowlist + in-session command skills from the
+# committed source. Safe to re-run. No sudoers file: claude-watchman runs as root,
+# which invokes read/observe commands directly (CLAUDE.md "How it runs").
 preflight_run() {
     command -v jq >/dev/null 2>&1 || { echo "preflight: jq is required (install.sh adds it)." >&2; return 1; }
     preflight_collate
     preflight_write_base_settings  "$WATCHMAN_CLAUDE_DIR"
     preflight_write_local_settings "$WATCHMAN_CLAUDE_DIR"
+    preflight_deploy_commands
     rm -f "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.dirs" "$WATCHMAN_ROOT/.pf.sudoers"
 }
 

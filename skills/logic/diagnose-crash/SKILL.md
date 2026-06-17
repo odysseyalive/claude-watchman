@@ -22,7 +22,7 @@ it diagnoses and journals a remediation suggestion; it never applies it.
 
 ## When to use
 
-Every `watchman audit`; especially after an unexpected reboot. Depends on logs
+Every `/watchman audit`; especially after an unexpected reboot. Depends on logs
 persisting across boots — see `check-log-retention`.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->

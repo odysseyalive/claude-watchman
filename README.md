@@ -62,19 +62,27 @@ dependencies, and permissions all work on this box before you trust anything els
 watchman selfcheck
 ```
 
-**2. Run your first audit, supervised.** This is also what validates the live skill path.
+**2. Run your first audit, in a session.** `audit` and `report` are AI features, so you
+run them *inside* Claude Code — where you watch the work and the token meter. Launch a
+session as root, then type the slash commands:
 
 ```bash
-watchman audit && watchman report
+claude              # launch Claude Code as root (/login once if needed)
+```
+```
+/watchman audit     # observe + analyze, journal findings
+/watchman report    # plain-language summary
 ```
 
-**3. Turn on recurring monitoring.** Run the loop in a tmux session so it persists but
-stays visible — you can re-attach any time to watch it work and see its token use:
+**3. Turn on recurring monitoring.** Keep the loop in a tmux session so it persists but
+stays visible — re-attach any time to watch it work and see its token use:
 
 ```bash
-tmux new -s watchman      # persistent session
-claude                    # launch Claude Code as root (/login once)
-/loop 30m watchman loop   # start the recurring pass, then Ctrl-b d to detach
+tmux new -s watchman       # persistent session
+claude                     # launch Claude Code as root (/login once)
+```
+```
+/loop 30m /watchman loop   # start the recurring pass, then Ctrl-b d to detach
 ```
 
 The loop observes, journals, and emails you only when something crosses a threshold.
@@ -82,29 +90,26 @@ Re-attach with `tmux attach -t watchman` whenever you want to see what it's doin
 
 ## Commands
 
-Run a verb — you never have to remember task strings or skill paths.
+claude-watchman splits its verbs on the token line. The two that spend nothing are
+shell commands; the AI features run inside a Claude Code session as `/watchman <verb>`,
+so their token use is always in front of you.
+
+**Shell CLI** — bash only, no Claude, no tokens:
 
 | Command | What it does |
 |---------|--------------|
-| `watchman selfcheck` | Bash-only plumbing check (no Claude). Run first on any new host. |
-| `watchman audit` | Observe + analyze, journal findings. No fixes. |
-| `watchman report` | Plain-language summary of the journal. |
-| `watchman loop` | One pass: observe → journal → delta → email if it matters. |
-| `watchman fix` | Interactive remediation, bounded by each finding's risk tier. |
-| `watchman inventory` | What's installed and how it serves. |
-| `watchman preflight` | Regenerate the Claude permission allowlist from the skill manifests. |
+| `watchman selfcheck` | Bash-only plumbing check. Run first on any new host. |
+| `watchman preflight` | Regenerate the Claude allowlist + the in-session `/watchman` command. |
 
-See what the machine knows right now:
+**In a Claude Code session** — AI features, visible token use:
 
-```bash
-watchman report
-```
-
-Fix things — interactively, with you confirming each change:
-
-```bash
-watchman fix
-```
+| Command | What it does |
+|---------|--------------|
+| `/watchman audit` | Observe + analyze, journal findings. No fixes. |
+| `/watchman report` | Plain-language summary of the journal. |
+| `/watchman loop` | One pass: observe → journal → delta → email if it matters. |
+| `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. |
+| `/watchman inventory` | What's installed and how it serves. |
 
 `fix` is the only verb that ever changes the system, and it's always interactive. It
 shows you the exact change, asks before applying anything risky, and never touches a
@@ -114,26 +119,30 @@ firewall rule or SSH config without showing the rule first.
 
 Run claude-watchman as **root** — it reads every log and journal directly, so there's
 no service user and no sudoers to manage. Auth is Claude Code's own login; there are no
-API keys.
+API keys. The AI verbs run in-session on purpose: Claude Code spends tokens on every
+pass, and you should be able to see that happening — never a silent background daemon.
 
-**One-off checks** — run a verb as root in a terminal and watch it:
+**One-off checks** — launch a session as root and run the slash commands:
 
 ```bash
-watchman audit && watchman report
+claude
+```
+```
+/watchman audit
+/watchman report
 ```
 
 **Recurring monitoring** — keep the loop in a tmux session. It persists across logout
 but stays attachable, so you always see what it's doing and what it spends:
 
 ```bash
-tmux new -s watchman      # persistent session
-claude                    # launch Claude Code as root (/login once)
-/loop 30m watchman loop   # start the loop, then Ctrl-b d to detach
-tmux attach -t watchman   # re-attach any time to watch it
+tmux new -s watchman       # persistent session
+claude                     # launch Claude Code as root (/login once)
 ```
-
-Running it this way — not as a silent background daemon — is deliberate: Claude Code
-spends tokens on every pass, and you should be able to see that happening.
+```
+/loop 30m /watchman loop   # start the loop, then Ctrl-b d to detach
+tmux attach -t watchman    # re-attach any time to watch it
+```
 
 ## Safety — two seatbelts and a backstop
 
@@ -172,10 +181,10 @@ Skills stay distro-blind; one resolver knows the differences.
 
 ## What gets committed
 
-Portable product only: `skills/`, `lib/`, `bin/watchman`, `journal/schema.sql`,
-`install.sh`, the `*.example` templates, `.gitignore`, and this README. Anything
-machine-specific or secret — `.env`, `config/watchman.conf`, `journal/findings.db`,
-`.claude/`, `CLAUDE.md` — is gitignored and never leaves the host.
+Portable product only: `skills/`, `commands/`, `lib/`, `bin/watchman`,
+`journal/schema.sql`, `install.sh`, the `*.example` templates, `.gitignore`, and this
+README. Anything machine-specific or secret — `.env`, `config/watchman.conf`,
+`journal/findings.db`, `.claude/`, `CLAUDE.md` — is gitignored and never leaves the host.
 
 ## License
 

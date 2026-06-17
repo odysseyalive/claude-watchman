@@ -21,7 +21,7 @@ memory pressure, and journal disk usage — measured against the thresholds in
 
 ## When to use
 
-Every `watchman audit` / `watchman loop`.
+Every `/watchman audit` / `/watchman loop`.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow

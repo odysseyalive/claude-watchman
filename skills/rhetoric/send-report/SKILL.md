@@ -23,8 +23,8 @@ are read solely by `lib/smtp.sh`.
 
 ## When to use
 
-In `watchman loop`, after `correlate-findings`, gated by the threshold. Not part of
-a plain `watchman report` (that just prints).
+In `/watchman loop`, after `correlate-findings`, gated by the threshold. Not part of
+a plain `/watchman report` (that just prints).
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow

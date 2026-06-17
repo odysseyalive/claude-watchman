@@ -22,7 +22,7 @@ never fixes.
 
 ## When to use
 
-Part of every `watchman audit` and `watchman loop` pass. Run it to refresh the
+Part of every `/watchman audit` and `/watchman loop` pass. Run it to refresh the
 hardening picture and track the Lynis hardening index as a trend.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->

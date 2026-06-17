@@ -21,7 +21,7 @@ read-only — it makes no changes and sends no mail (that is `send-report`).
 
 ## When to use
 
-`watchman report`, and as the body builder for `send-report`.
+`/watchman report`, and as the body builder for `send-report`.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow

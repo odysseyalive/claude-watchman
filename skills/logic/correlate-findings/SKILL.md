@@ -22,7 +22,7 @@ records a run summary the loop uses to decide whether to email.
 
 ## When to use
 
-After the observe skills in every `watchman audit` / `watchman loop`, before
+After the observe skills in every `/watchman audit` / `/watchman loop`, before
 `send-report`/`report-status`.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->

@@ -21,7 +21,7 @@ Read-only.
 
 ## When to use
 
-Early in every `watchman audit` / `watchman inventory`, before the skills that
+Early in every `/watchman audit` / `/watchman inventory`, before the skills that
 depend on knowing which web server or database is present.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->

@@ -10,7 +10,7 @@ allowed-tools: Read, Glob, Grep, Bash, Edit, Write
 Remediates findings and updates their status. This is the only skill that changes
 system state, so the Prime Directive governs it most directly: its destructive-action
 gate **is** the Prime Directive, layered on top of — never instead of — the risk
-tiers. Operator-run only (`watchman fix`); its mutating commands are deliberately
+tiers. Operator-run only (`/watchman fix`); its mutating commands are deliberately
 absent from the loop's `dontAsk` allowlist, so the loop cannot apply them.
 
 > **PRIME DIRECTIVE (outranks everything below).** Do nothing destructive. If any action
@@ -23,7 +23,7 @@ absent from the loop's `dontAsk` allowlist, so the loop cannot apply them.
 
 ## When to use
 
-Only via `watchman fix`, interactively, with the operator present to confirm.
+Only via `/watchman fix`, interactively, with the operator present to confirm.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Risk-tier gate (a hard safety boundary)
