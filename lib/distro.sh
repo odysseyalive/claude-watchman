@@ -374,11 +374,15 @@ integrity_verifier() {  # echoes: debsums | rpm | pacman | aide | none
     esac
 }
 integrity_verify_all() {
+    # Whole-filesystem verification is the heaviest disk read in the project. If the
+    # caller sourced lib/io-courtesy.sh, run it at idle I/O priority so it can't
+    # compete with a busy server's real workload; otherwise run it plain.
+    _iv() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
     case "$(integrity_verifier)" in
-        debsums) sudo debsums -c 2>/dev/null ;;            # prints failures only
-        rpm)     rpm -Va 2>/dev/null | awk '$1 ~ /5/{print $NF}' ;;  # files w/ MD5 mismatch
-        pacman)  pacman -Qkk 2>/dev/null | awk '/warning|FAILED/{print}' ;;
-        aide)    sudo aide --check 2>/dev/null ;;
+        debsums) _iv sudo debsums -c 2>/dev/null ;;            # prints failures only
+        rpm)     _iv rpm -Va 2>/dev/null | awk '$1 ~ /5/{print $NF}' ;;  # files w/ MD5 mismatch
+        pacman)  _iv pacman -Qkk 2>/dev/null | awk '/warning|FAILED/{print}' ;;
+        aide)    _iv sudo aide --check 2>/dev/null ;;
         *) echo "integrity: no verifier available" >&2; return 2 ;;
     esac
 }

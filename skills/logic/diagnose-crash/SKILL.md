@@ -28,13 +28,16 @@ persisting across boots — see `check-log-retention`.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`.
-2. **Enumerate boots.** `sudo journalctl --list-boots`. Walk them **backward** from
-   the current boot.
+1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
+   `journal_init`. **I/O courtesy:** walking journald across boots can be heavy — IF
+   `io_should_defer_heavy`, journal one `capacity`/`info`/`safe` `diagnostic_deferred`
+   (`target=diagnose-crash`, detail `"deferred: $(io_pressure_reason)"`) and skip this pass.
+2. **Enumerate boots.** `io_run sudo journalctl --list-boots`. Walk them **backward**
+   from the current boot.
 3. **Per boot, hunt the kernel's own words.** Search for
    `Out of memory`, `Killed process`, `oom-kill`, and services exiting with
-   **code 137** (SIGKILL — typically the OOM killer):
-   `sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
+   **code 137** (SIGKILL — typically the OOM killer), at idle priority:
+   `io_run sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
 4. **Identify victim and hog.** From the OOM message extract the killed process and
    the memory consumer. Correlate with `check-capacity`'s `memory_pressure` finding.
 5. **Journal a finding** `check_id=oom_recent_kill`, `category=capacity`,

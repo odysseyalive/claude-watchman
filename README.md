@@ -153,6 +153,12 @@ Inside it, launch Claude as root (`claude`, run `/login` once), then start the l
 
 Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
 
+**It won't take down a busy server.** The heavy reads (integrity verification, full log
+scans, Lynis, journald walks) run at idle I/O and lowest CPU priority, and are **skipped
+when the box is already under load** — the loop records "deferred — system busy" and
+retries next pass instead of piling diagnostic I/O onto a strained machine. Tune the
+thresholds (`WATCHMAN_IO_GUARD_LOAD`, etc.) in `config/watchman.conf`.
+
 ## Safety — two seatbelts and a backstop
 
 The loop is observe-and-report only. Two independent layers keep it that way, with a

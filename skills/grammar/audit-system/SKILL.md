@@ -28,11 +28,18 @@ hardening picture and track the Lynis hardening index as a trend.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`.
-   Resolve `family="$(watchman_family)"` and `profile="$(watchman_profile)"`.
-2. **Run Lynis** (read-only system audit): `sudo lynis audit system --quiet --no-colors`.
-   Lynis writes machine-readable results to `$(log_path_lynis)`
-   (`/var/log/lynis-report.dat`). Do not parse human stdout — parse the report file.
+1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
+   `journal_init`. Resolve `family="$(watchman_family)"` and `profile="$(watchman_profile)"`.
+1b. **I/O courtesy gate (don't take down a busy server).** A full Lynis run is heavy.
+   IF `io_should_defer_heavy` → journal one `category=capacity`, `severity=info`,
+   `risk_tier=safe`, `check_id=diagnostic_deferred`, `target=audit-system` finding with
+   detail `"deferred: $(io_pressure_reason)"`, then SKIP the Lynis run this pass (retry
+   next pass). Do NOT pile heavy I/O onto an already-loaded box.
+2. **Run Lynis** (read-only system audit), at idle priority via `io_run`:
+   `io_run sudo lynis audit system --quiet --no-colors`. Lynis writes machine-readable
+   results to `$(log_path_lynis)` (`/var/log/lynis-report.dat`). Do not parse human
+   stdout — parse the report file. (Any whole-filesystem integrity verification reached
+   through `integrity_verify_all` is already idle-priced when io-courtesy is sourced.)
 3. **Capture the hardening index** as a tracked metric:
    read `hardening_index=` from the report and
    `journal_record_metric lynis_hardening_index "$value"` so the loop can chart drift.
@@ -54,4 +61,6 @@ hardening picture and track the Lynis hardening index as a trend.
 - `lib/journal.sh` — the only gate to findings.db (`journal_upsert`, `journal_record_metric`).
 - `lib/distro.sh` — `log_path_lynis`, `watchman_family`.
 - `lib/profile.sh` — `profile_severity`, `profile_runs_check`.
+- `lib/io-courtesy.sh` — `io_run`, `io_should_defer_heavy`, `io_pressure_reason` (never
+  degrade a busy server: idle-priced heavy reads, deferral under load).
 - `manifest.json` — declared permissions (lynis + the report path).

@@ -21,6 +21,17 @@ WATCHMAN_DISK_WARN_PCT=85           # disk usage % that raises a capacity findin
 WATCHMAN_INODE_WARN_PCT=85
 WATCHMAN_MEM_WARN_PCT=90
 
+# --- I/O courtesy (never degrade a busy server) -----------------------------
+# claude-watchman's heavy reads (integrity verify, full log scans, Lynis, journald
+# walks) run at idle I/O + lowest CPU priority, and are SKIPPED ("deferred") when
+# the box is already under load — so a diagnostic can never take a high-use server
+# down. See lib/io-courtesy.sh.
+WATCHMAN_IONICE=yes                 # run heavy commands via ionice -c3 + nice -n19
+WATCHMAN_IO_TIMEOUT=300             # wall-clock cap (seconds) on a heavy command
+WATCHMAN_IO_GUARD=yes               # defer heavy diagnostics when the box is busy
+WATCHMAN_IO_GUARD_LOAD=1.5          # per-core 1-min load above which to defer
+WATCHMAN_IO_GUARD_MEM_PCT=10        # defer when available memory drops below this %
+
 # --- Inbound rate / DDoS detection (server) ---------------------------------
 # inspect-logs flags a single source IP whose PEAK requests-in-one-minute (from
 # the web access logs) reaches this, as a high-severity security finding with a

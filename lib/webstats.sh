@@ -38,14 +38,17 @@ webstats_access_logs() {
     done < <(webserver_log_paths 2>/dev/null) | awk '!seen[$0]++'
 }
 
-# Stream the (possibly .gz) access logs to stdout.
+# Stream the (possibly .gz) access logs to stdout. When lib/io-courtesy.sh is
+# sourced, the (heavy) reads run at idle I/O priority so a large/rotated log scan
+# never competes with a busy server's real workload.
 webstats_cat_logs() {
     local f
+    _wc() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
     while IFS= read -r f; do
         [[ -e "$f" ]] || continue
         case "$f" in
-            *.gz) zcat -- "$f" 2>/dev/null ;;
-            *)    cat  -- "$f" 2>/dev/null ;;
+            *.gz) _wc zcat -- "$f" 2>/dev/null ;;
+            *)    _wc cat  -- "$f" 2>/dev/null ;;
         esac
     done < <(webstats_access_logs)
 }

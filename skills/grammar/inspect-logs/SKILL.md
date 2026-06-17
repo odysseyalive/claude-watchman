@@ -31,8 +31,12 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`;
-   `dir="$(profile_log_direction)"` → `inbound` or `outbound`.
+1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
+   `journal_init`; `dir="$(profile_log_direction)"` → `inbound` or `outbound`. **I/O
+   courtesy:** scanning large/rotated logs is heavy — IF `io_should_defer_heavy`, journal
+   one `capacity`/`info`/`safe` `diagnostic_deferred` (`target=inspect-logs`,
+   detail `"deferred: $(io_pressure_reason)"`) and skip the log-scan/rate steps this pass;
+   otherwise run the scans through `io_run` (the webstats engine idle-prices its reads).
 2. **CrowdSec path (preferred).** If `cscli` is available:
    `sudo cscli alerts list -o json` and `sudo cscli decisions list -o json`
    (alert-only — never auto-ban from here, especially on a workstation). Respect the

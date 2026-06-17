@@ -21,6 +21,7 @@ config/watchman.conf.example
 install.sh
 journal/schema.sql
 lib/distro.sh
+lib/io-courtesy.sh
 lib/journal.sh
 lib/preflight.sh
 lib/profile.sh
