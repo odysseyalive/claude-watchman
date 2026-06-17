@@ -1,0 +1,13 @@
+{
+  "skill": "check-shell-history",
+  "stage": "grammar",
+  "reads": ["/home", "/root"],
+  "commands": [
+    { "family": "stat", "args": "*", "needs_sudo": false },
+    { "family": "last", "args": "*", "needs_sudo": false },
+    { "family": "lsattr", "args": "*", "needs_sudo": false },
+    { "family": "getent", "args": "*", "needs_sudo": false }
+  ],
+  "resolver_ops": [],
+  "fixes": []
+}

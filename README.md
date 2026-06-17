@@ -175,7 +175,7 @@ deny base beneath them:
 |---|--------|-------------|
 | Looks for | Inbound attack surface — exposed ports, web headers, CORS, SSH hardening, probes, and request-rate spikes (DDoS/abuse) that propose a firewall block | What the machine talks *to* — new outbound connections vs. a baseline |
 | Top concern | Public-facing exposure | **Log retention** — volatile journald loses the forensic trail on reboot |
-| Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity | |
+| Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity, and forensic-trail tampering — shell history (all users + root) wiped/disabled or login records truncated | |
 
 ## Web analytics, without the trackers
 

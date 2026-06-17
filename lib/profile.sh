@@ -56,6 +56,7 @@ inode_capacity:medium:low
 memory_pressure:medium:medium
 oom_recent_kill:high:high
 integrity_modified_files:high:medium
+shell_history_integrity:high:high
 service_inventory:info:info
 '
 
