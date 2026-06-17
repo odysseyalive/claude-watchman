@@ -38,9 +38,10 @@ webstats_access_logs() {
     done < <(webserver_log_paths 2>/dev/null) | awk '!seen[$0]++'
 }
 
-# Stream the (possibly .gz) access logs to stdout. When lib/io-courtesy.sh is
-# sourced, the (heavy) reads run at idle I/O priority so a large/rotated log scan
-# never competes with a busy server's real workload.
+# Stream the (possibly .gz) access logs to stdout — the FULL set (current + rotated
+# + .gz). Used by `/watchman stats`, which wants a complete picture. When
+# lib/io-courtesy.sh is sourced, the (heavy) reads run at the role's I/O priority so
+# a large scan never competes with a busy server's real workload.
 webstats_cat_logs() {
     local f
     _wc() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
@@ -51,6 +52,63 @@ webstats_cat_logs() {
             *)    _wc cat  -- "$f" 2>/dev/null ;;
         esac
     done < <(webstats_access_logs)
+}
+
+# The LIVE (currently-growing) access logs only — no rotated `.N` / `.gz` (the glob
+# requires a trailing `.log`, so access.log.1 / access.log.gz are excluded).
+webstats_current_logs() {
+    local dir f
+    while IFS= read -r dir; do
+        [[ -d "$dir" ]] || continue
+        for f in "$dir"/access.log "$dir"/access_log "$dir"/*access*.log; do
+            [[ -f "$f" ]] || continue
+            case "$f" in *error*) continue ;; esac
+            printf '%s\n' "$f"
+        done
+    done < <(webserver_log_paths 2>/dev/null) | awk '!seen[$0]++'
+}
+
+# Where the per-log read offsets are remembered (gitignored local state).
+webstats_offset_file() { echo "${WATCHMAN_ROOT:-.}/journal/log-offsets.txt"; }
+
+# webstats_cat_logs_incremental — emit only the NEW bytes of each LIVE access log
+# since the last pass, then advance the stored offset. This bounds the loop's read
+# to traffic-since-last-pass instead of the whole log every time.
+#
+#   * Same file (inode unchanged) and grown → read [offset, end] only.
+#   * Rotated (inode changed) or truncated (size < offset) → read the current file
+#     from 0 this pass, and reset. Rotated `.N`/`.gz` history is NOT re-read (the
+#     loop already saw it while it was live). One small caveat: the handful of lines
+#     written between the last pass and a rotation can be missed by the incremental
+#     path — `/watchman stats` (full read) is always complete, so use it for an
+#     authoritative report.
+#
+# Offsets persist in journal/log-offsets.txt as TSV: <path> <inode> <size>.
+webstats_cat_logs_incremental() {
+    local ofile tmp f inode size start
+    local -A OFF_INODE=() OFF_SIZE=()
+    _wc() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
+    ofile="$(webstats_offset_file)"
+    if [[ -r "$ofile" ]]; then
+        local k i s
+        while IFS=$'\t' read -r k i s; do
+            [[ -n "$k" ]] && { OFF_INODE["$k"]="$i"; OFF_SIZE["$k"]="$s"; }
+        done < "$ofile"
+    fi
+    tmp="$(mktemp)"
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        inode="$(stat -c%i "$f" 2>/dev/null)"; size="$(stat -c%s "$f" 2>/dev/null)"
+        [[ -n "$inode" && -n "$size" ]] || continue
+        start=0
+        if [[ "${OFF_INODE[$f]:-}" == "$inode" && -n "${OFF_SIZE[$f]:-}" && "$size" -ge "${OFF_SIZE[$f]}" ]]; then
+            start="${OFF_SIZE[$f]}"
+        fi
+        (( size > start )) && _wc tail -c "+$(( start + 1 ))" -- "$f" 2>/dev/null
+        printf '%s\t%s\t%s\n' "$f" "$inode" "$size" >> "$tmp"
+    done < <(webstats_current_logs)
+    # Atomically replace the offset state (last-writer-wins; offsets are advisory).
+    mv -f "$tmp" "$ofile" 2>/dev/null || rm -f "$tmp"
 }
 
 # Compute the aggregates with awk. Emits TSV records consumed by webstats_report:
@@ -175,7 +233,13 @@ webstats_report() {
 # $1 = per-minute threshold (default: $WATCHMAN_RATE_PER_MIN, else 300).
 webstats_rate_offenders() {
     local th="${1:-${WATCHMAN_RATE_PER_MIN:-300}}"
-    webstats_cat_logs | awk -v THMIN="$th" '
+    # This runs every loop pass, so read INCREMENTALLY by default — only the new log
+    # lines since last pass — to keep the footprint proportional to recent traffic.
+    # Set WATCHMAN_LOG_INCREMENTAL=no to scan the full logs each time instead.
+    local src=webstats_cat_logs
+    [[ "${WATCHMAN_LOG_INCREMENTAL:-yes}" == yes ]] && declare -F webstats_cat_logs_incremental >/dev/null \
+        && src=webstats_cat_logs_incremental
+    "$src" | awk -v THMIN="$th" '
     function mnum(m){ return (index("JanFebMarAprMayJunJulAugSepOctNovDec", m)-1)/3 + 1 }
     {
         n = split($0, q, "\""); if (n < 1) next

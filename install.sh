@@ -281,6 +281,7 @@ journal/findings.db
 journal/findings.db-wal
 journal/findings.db-shm
 journal/network-baseline.txt
+journal/log-offsets.txt
 journal/.write.lock
 EOF
 fi

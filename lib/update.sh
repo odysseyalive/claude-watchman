@@ -104,8 +104,8 @@ update_check_run() {
     printf '\n1. Machine artifacts gitignored\n'
     local p
     for p in .env config/watchman.conf journal/findings.db journal/findings.db-wal \
-             journal/findings.db-shm journal/network-baseline.txt journal/.write.lock \
-             .claude CLAUDE.md; do
+             journal/findings.db-shm journal/network-baseline.txt journal/log-offsets.txt \
+             journal/.write.lock .claude CLAUDE.md; do
         if git check-ignore -q "$p"; then _uc_ok "ignored: $p"
         else _uc_fail "NOT gitignored: $p — it could be committed or clobbered"; fi
     done

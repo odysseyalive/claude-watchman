@@ -182,6 +182,9 @@ gets expensive. Set the **role** in `config/watchman.conf`: `WATCHMAN_PRIORITY=g
 to everything, the default), `peer`, or `priority` — the last for a **dedicated monitoring
 box where claude-watchman is the critical workload** and should keep running rather than
 defer. Thresholds (`WATCHMAN_IO_GUARD_PSI`, `WATCHMAN_CHECK_TIME_BUDGET`, …) are tunable.
+And the loop reads logs **incrementally** — only the new lines since the last pass — so its
+read stays proportional to recent traffic, not the size of your logs (`/watchman stats`
+still reads the full set for an authoritative report).
 
 ## Safety — two seatbelts and a backstop
 

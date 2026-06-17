@@ -54,8 +54,11 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 4. **Request-rate spikes (DDoS / abuse) — server profile.** If
    `profile_runs_check request_rate_spike`: `source lib/webstats.sh` and run
    `webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the
-   peak requests-in-one-minute from a single source). This reuses the web-stats log
-   parser but — unlike the anonymized `/watchman stats` analytics — **keeps the real
+   peak requests-in-one-minute from a single source). It reads **incrementally** by
+   default (`WATCHMAN_LOG_INCREMENTAL`) — only the new log lines since the last pass,
+   so each loop's read is proportional to recent traffic, not total log size. This
+   reuses the web-stats log parser but — unlike the anonymized `/watchman stats`
+   analytics — **keeps the real
    offending IP**, because you cannot firewall-block a hash and this is the security
    path (defending the system, a different legal basis). For each offender, journal:
    `category=security`, `severity=$(profile_severity request_rate_spike)`,

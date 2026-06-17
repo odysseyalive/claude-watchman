@@ -36,6 +36,7 @@ WATCHMAN_IO_GUARD_PSI=20           # defer when /proc/pressure/io 'some avg10' e
 WATCHMAN_IO_GUARD_LOAD=1.5         # per-core 1-min load to defer at when PSI is unavailable
 WATCHMAN_IO_GUARD_MEM_PCT=10       # defer when available memory drops below this %
 WATCHMAN_CHECK_TIME_BUDGET=120     # a check taking longer than this (s) is flagged as expensive (self-footprint)
+WATCHMAN_LOG_INCREMENTAL=yes       # loop log/rate scans read only NEW lines since last pass (offsets in journal/log-offsets.txt); 'no' = full scan each time
 
 # --- Inbound rate / DDoS detection (server) ---------------------------------
 # inspect-logs flags a single source IP whose PEAK requests-in-one-minute (from
