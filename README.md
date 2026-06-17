@@ -48,8 +48,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watc
 bash install.sh
 ```
 
-It detects your distro and profile, creates a dedicated `watchman` user with scoped
-sudoers, and generates the permission allowlists. Every privileged step asks first.
+Run it as root. It detects your distro and profile, installs dependencies, sets up the
+journal and config, and generates the Claude permission allowlist. Every privileged
+step asks first. There's no service user to create — claude-watchman runs as root and
+reads your logs directly.
 
 ## Quick start
 
@@ -66,15 +68,17 @@ watchman selfcheck
 watchman audit && watchman report
 ```
 
-**3. Turn on recurring monitoring.** Cadence is Claude Code's built-in `/loop`.
-Type this inside a Claude Code session:
+**3. Turn on recurring monitoring.** Run the loop in a tmux session so it persists but
+stays visible — you can re-attach any time to watch it work and see its token use:
 
-```
-/loop 30m watchman loop
+```bash
+tmux new -s watchman      # persistent session
+claude                    # launch Claude Code as root (/login once)
+/loop 30m watchman loop   # start the recurring pass, then Ctrl-b d to detach
 ```
 
-That's it. The loop observes, journals, and emails you only when something crosses a
-threshold.
+The loop observes, journals, and emails you only when something crosses a threshold.
+Re-attach with `tmux attach -t watchman` whenever you want to see what it's doing.
 
 ## Commands
 
@@ -88,7 +92,7 @@ Run a verb — you never have to remember task strings or skill paths.
 | `watchman loop` | One pass: observe → journal → delta → email if it matters. |
 | `watchman fix` | Interactive remediation, bounded by each finding's risk tier. |
 | `watchman inventory` | What's installed and how it serves. |
-| `watchman preflight` | Regenerate the permission allowlists from the skill manifests. |
+| `watchman preflight` | Regenerate the Claude permission allowlist from the skill manifests. |
 
 See what the machine knows right now:
 
@@ -102,42 +106,47 @@ Fix things — interactively, with you confirming each change:
 watchman fix
 ```
 
-`fix` is the only verb that ever changes the system, and it's always supervised. It
+`fix` is the only verb that ever changes the system, and it's always interactive. It
 shows you the exact change, asks before applying anything risky, and never touches a
 firewall rule or SSH config without showing the rule first.
 
 ## Running it
 
-Auth is Claude Code's own login. claude-watchman runs *inside* Claude Code and uses
-the session of whoever starts it.
+Run claude-watchman as **root** — it reads every log and journal directly, so there's
+no service user and no sudoers to manage. Auth is Claude Code's own login; there are no
+API keys.
 
-**Supervised** (recommended; required for `fix`) — run as yourself in an authenticated
-Claude Code session. Your existing login is used. Nothing to set up.
-
-```bash
-watchman audit
-```
-
-**Unattended** — run the loop as the dedicated `watchman` service user. Log in once as
-that user and Claude Code remembers it:
+**One-off checks** — run a verb as root in a terminal and watch it:
 
 ```bash
-sudo -u watchman -i claude   # then type /login
+watchman audit && watchman report
 ```
 
-Then start the loop from a Claude Code session running as that user.
+**Recurring monitoring** — keep the loop in a tmux session. It persists across logout
+but stays attachable, so you always see what it's doing and what it spends:
 
-## Safety — three seatbelts
+```bash
+tmux new -s watchman      # persistent session
+claude                    # launch Claude Code as root (/login once)
+/loop 30m watchman loop   # start the loop, then Ctrl-b d to detach
+tmux attach -t watchman   # re-attach any time to watch it
+```
 
-The loop is observe-and-report only. Three independent layers — generated together from
-the same skill manifests, so they can't drift apart — make sure it stays that way:
+Running it this way — not as a silent background daemon — is deliberate: Claude Code
+spends tokens on every pass, and you should be able to see that happening.
+
+## Safety — two seatbelts and a backstop
+
+The loop is observe-and-report only. Two independent layers keep it that way, with a
+deny base beneath them:
 
 1. **Risk tiers.** The fixer never auto-applies a `review` or `manual` finding. It shows
    the exact change and confirms per-finding.
-2. **Claude allowlist.** Scoped to read-only observe + report under `dontAsk`, so a
-   headless loop *cannot* invoke a mutating command — it auto-denies and fails loud.
-3. **OS sudoers.** Grants the `watchman` user only the read/observe commands the skills
-   declared — never a mutating one, never a blanket `ALL`.
+2. **Claude allowlist.** Scoped to read-only observe + report under `dontAsk`, so the
+   loop *cannot* invoke a mutating command — it auto-denies and fails loud.
+3. **Deny base (backstop).** Even running as root, `settings.json` explicitly denies the
+   destructive command patterns — `rm`, `dd`, `mkfs`, `systemctl stop/disable`, anything
+   touching sudoers — and an allow can never override a deny.
 
 `bypassPermissions` is never used. Remediation only ever happens when **you** run
 `watchman fix`.

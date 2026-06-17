@@ -10,8 +10,8 @@ allowed-tools: Read, Glob, Grep, Bash, Edit, Write
 Remediates findings and updates their status. This is the only skill that changes
 system state, so the Prime Directive governs it most directly: its destructive-action
 gate **is** the Prime Directive, layered on top of — never instead of — the risk
-tiers. Operator-run only (`watchman fix`); it is deliberately absent from the
-unattended loop's allowlist and from the watchman sudoers file.
+tiers. Operator-run only (`watchman fix`); its mutating commands are deliberately
+absent from the loop's `dontAsk` allowlist, so the loop cannot apply them.
 
 > **PRIME DIRECTIVE (outranks everything below).** Do nothing destructive. If any action
 > would delete or overwrite a file or directory, modify a database in any way, sever access

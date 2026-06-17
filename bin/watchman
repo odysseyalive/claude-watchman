@@ -25,7 +25,12 @@
 
 set -euo pipefail
 
-WATCHMAN_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_self="${BASH_SOURCE[0]}"
+# Resolve symlinks so /usr/local/bin/watchman → repo/bin/watchman finds the repo.
+if [[ -L "$_self" ]] && command -v readlink >/dev/null 2>&1; then
+    _self="$(readlink -f "$_self")"
+fi
+WATCHMAN_BIN_DIR="$(cd "$(dirname "$_self")" && pwd)"
 export WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$WATCHMAN_BIN_DIR/.." && pwd)}"
 
 usage() {
@@ -40,12 +45,16 @@ watchman — claude-watchman operator CLI. Run a verb:
   watchman preflight   Regenerate the permission artifacts from the skill manifests (pure bash).
   watchman inventory   What is installed and how it serves (grammar/inventory-services).
 
-Cadence is Claude Code's built-in /loop — claude-watchman ships NO scheduler:
-    /loop 30m watchman loop
+Recurring monitoring — claude-watchman ships NO scheduler. Run the loop inside a tmux
+session (as root) so it persists AND stays visible — re-attach any time to see what it
+is doing and what tokens it spends:
+    tmux new -s watchman      # persistent session
+    claude                    # launch Claude Code as root (/login once)
+    /loop 30m watchman loop   # start the recurring pass
+    # Ctrl-b d to detach; 'tmux attach -t watchman' to re-attach
 
-Run-as-user: see README.md § Running. Uses the Claude Code login of whoever runs it —
-supervised (your login) vs unattended (the watchman user's own login). `watchman fix`
-is always supervised.
+Run as root: claude-watchman has no service user — root reads all logs directly.
+Auth is Claude Code's own login. `watchman fix` is always interactive.
 EOF
     exit "${1:-0}"
 }
@@ -98,7 +107,7 @@ case "$verb" in
         # shellcheck source=lib/preflight.sh
         source "$WATCHMAN_ROOT/lib/preflight.sh"
         preflight_run
-        echo "watchman: preflight complete. Install the staged sudoers via install.sh (root)."
+        echo "watchman: preflight complete (Claude allowlist regenerated; runs as root, no sudoers)."
         ;;
 
     audit)

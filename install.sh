@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # install.sh — one-time operator setup for claude-watchman.
 #
-# Detects family + profile, installs dependencies, creates the dedicated watchman
-# system user, writes config/journal/.gitignore/.env, runs the preflight to
-# generate BOTH permission allowlists, installs the scoped sudoers file, and links
-# the bin/watchman CLI. Re-runnable: it never clobbers .env or an existing config,
-# appends to .gitignore idempotently, and regenerates its own artifacts.
+# claude-watchman installs and runs as ROOT (CLAUDE.md "How it runs"): there is
+# no dedicated watchman user and no OS sudoers file — root invokes the read/
+# observe commands directly. This installer detects family + profile, installs
+# dependencies, writes config/journal/.gitignore/.env, runs the preflight to
+# generate the Claude permission allowlist, and links the bin/watchman CLI.
+# Re-runnable: it never clobbers .env or an existing config, appends to
+# .gitignore idempotently, and regenerates its own artifacts.
 #
 # > PRIME DIRECTIVE. This installer performs privileged, system-mutating setup
-# > (package install, user creation, sudoers, symlink) — but it is OPERATOR-RUN
-# > with explicit intent, and it asks before each privileged step unless --yes is
-# > given. It still does nothing DESTRUCTIVE: it never deletes user data, never
-# > overwrites .env or an existing watchman.conf, never stops/removes services.
-# > The only file it (re)writes that it owns is /etc/sudoers.d/watchman, validated
-# > with `visudo -cf` first so a bad rule can never lock the system.
+# > (package install, symlink) — but it is OPERATOR-RUN with explicit intent, and
+# > it asks before each privileged step unless --yes is given. It still does
+# > nothing DESTRUCTIVE: it never deletes user data, never overwrites .env or an
+# > existing watchman.conf, never stops/removes services.
 #
-# Usage:
+# Usage (run as root, or via sudo):
 #   Local checkout:   bash install.sh [--profile server|workstation] [--yes]
 #   Remote one-liner: bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
 #                     (use the bash -c "$(...)" form, NOT `curl | bash`, so the
@@ -197,26 +197,15 @@ if ! command -v cscli >/dev/null 2>&1; then
     fi
 fi
 
-# --- 3. Dedicated watchman system user -------------------------------------
-WATCHMAN_USER="${WATCHMAN_USER:-watchman}"
-if id "$WATCHMAN_USER" >/dev/null 2>&1; then
-    say "User '$WATCHMAN_USER' already exists"
-else
-    say "Creating non-login system user '$WATCHMAN_USER'"
-    if confirm "Create system user '$WATCHMAN_USER'?"; then
-        # Give it a home so Claude Code config can persist for the unattended model.
-        # Shell stays nologin per CLAUDE.md's non-login intent; for a fully headless
-        # `/loop` AS the watchman user you grant a login shell yourself — see README
-        # § Running (the supervised-as-operator model needs no shell change).
-        home="/var/lib/$WATCHMAN_USER"
-        case "$FAMILY" in
-            arch|rhel) $SUDO useradd --system --create-home --home-dir "$home" --shell /usr/sbin/nologin "$WATCHMAN_USER" 2>/dev/null \
-                       || $SUDO useradd --system --create-home --home-dir "$home" --shell /sbin/nologin "$WATCHMAN_USER" ;;
-            debian)    $SUDO useradd --system --create-home --home-dir "$home" --shell /usr/sbin/nologin "$WATCHMAN_USER" ;;
-        esac
-        # journald read access without sudo where the group exists.
-        getent group systemd-journal >/dev/null 2>&1 && $SUDO usermod -aG systemd-journal "$WATCHMAN_USER" || true
-    fi
+# --- 3. Run-as user ---------------------------------------------------------
+# claude-watchman runs as root — no dedicated service user is created. root reads
+# every log and journal directly, so the loop needs no sudoers grant. The
+# config records this for transparency.
+WATCHMAN_USER=root
+if [[ $EUID -ne 0 ]]; then
+    warn "claude-watchman is designed to run as root; you are installing as a normal user."
+    warn "Privileged setup steps below use sudo, and you should run 'claude' as root (see the"
+    warn "tmux instructions at the end) so the loop can read all logs."
 fi
 
 # --- 4. config / .env / .gitignore / journal -------------------------------
@@ -258,6 +247,7 @@ journal/findings.db
 journal/findings.db-wal
 journal/findings.db-shm
 journal/network-baseline.txt
+journal/.write.lock
 EOF
 fi
 
@@ -267,30 +257,12 @@ say "Initializing journal"
 WATCHMAN_PROFILE="$PROFILE" WATCHMAN_FAMILY="$FAMILY" source "$ROOT/lib/journal.sh"
 journal_init || die "journal init failed"
 
-# --- 5. Preflight: generate both allowlists --------------------------------
-say "Running preflight (generating .claude/settings.local.json + staged sudoers)"
-WATCHMAN_USER="$WATCHMAN_USER" WATCHMAN_PROFILE="$PROFILE" WATCHMAN_FAMILY="$FAMILY" \
+# --- 5. Preflight: generate the Claude permission allowlist ----------------
+say "Running preflight (generating .claude/settings.local.json)"
+WATCHMAN_PROFILE="$PROFILE" WATCHMAN_FAMILY="$FAMILY" \
     bash "$ROOT/lib/preflight.sh"
 
-# --- 6. Install the scoped sudoers (validated) -----------------------------
-STAGED="$ROOT/.watchman-sudoers.staged"
-if [[ -f "$STAGED" ]]; then
-    say "Validating staged sudoers with visudo before installing"
-    if $SUDO visudo -cf "$STAGED" >/dev/null 2>&1; then
-        if confirm "Install scoped sudoers to /etc/sudoers.d/$WATCHMAN_USER (read/observe commands only)?"; then
-            $SUDO install -m 0440 -o root -g root "$STAGED" "/etc/sudoers.d/$WATCHMAN_USER"
-            say "Installed /etc/sudoers.d/$WATCHMAN_USER"
-        else
-            warn "Skipped sudoers install — privileged observe checks (lynis, journalctl…) will fail under the loop."
-        fi
-    else
-        warn "Could not validate staged sudoers (sudo auth failed, or syntax error)."
-        warn "Inspect $STAGED and install manually:  sudo install -m 0440 $STAGED /etc/sudoers.d/$WATCHMAN_USER"
-    fi
-    rm -f "$STAGED"
-fi
-
-# --- 7. Link the CLI --------------------------------------------------------
+# --- 6. Link the CLI --------------------------------------------------------
 LINK=/usr/local/bin/watchman
 chmod +x "$ROOT/bin/watchman"
 if [[ -L "$LINK" || ! -e "$LINK" ]]; then
@@ -308,23 +280,26 @@ cat <<EOF
 
 $(say "claude-watchman installed.")
 
-Next steps:
+Next steps (run everything as root):
   1. VERIFY PLUMBING FIRST (no Claude needed):
          watchman selfcheck
   2. Fill in SMTP creds in  $ROOT/.env   (leave SMTP_PASS blank to disable mail)
-  3. First audit (supervised — this validates the live claude->skill path):
+  3. First audit (this validates the live claude->skill path):
          watchman audit && watchman report
-  4. Recurring monitoring (Claude Code's built-in scheduler — no cron/systemd):
-         /loop 30m watchman loop
 
-Running model (see README.md § Running for detail) — auth is Claude Code's own login:
-  - Supervised  : run as yourself in an authenticated Claude Code session. Uses your
-                  existing login. REQUIRED for 'watchman fix'.
-  - Unattended  : run the loop as the '$WATCHMAN_USER' user. Log in once as that user
-                  ('sudo -u $WATCHMAN_USER -i claude' then /login); Claude Code persists it.
-                  '/loop' needs an interactive session, so '$WATCHMAN_USER' needs a login shell.
+Recurring monitoring — run the loop in a tmux session you can re-attach to, so you
+always SEE what it does and what tokens it spends (no silent background daemon):
 
-Safety: the loop observes and reports only. It can never apply a review/manual fix
-— the dontAsk allowlist forbids mutating actions and the sudoers file omits them.
-Remediation happens only when YOU run 'watchman fix' interactively.
+     tmux new -s watchman      # start a persistent session
+     claude                    # launch Claude Code as root (log in once with /login)
+     /loop 30m watchman loop   # start the recurring pass inside that session
+     # Ctrl-b then d           # detach — the loop keeps running, visible on re-attach
+     tmux attach -t watchman   # re-attach any time to watch it / read token use
+
+Auth is Claude Code's own login (no API keys). 'watchman fix' is always interactive —
+run it yourself when you want to remediate.
+
+Safety: the loop observes and reports only. It can never apply a review/manual fix —
+the dontAsk allowlist forbids mutating actions and the deny base blocks destructive
+commands even as root. Remediation happens only when YOU run 'watchman fix'.
 EOF

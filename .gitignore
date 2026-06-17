@@ -10,6 +10,7 @@ journal/findings.db
 journal/findings.db-wal
 journal/findings.db-shm
 journal/network-baseline.txt
+journal/.write.lock
 
 # preflight staging + scratch
 .watchman-sudoers.staged

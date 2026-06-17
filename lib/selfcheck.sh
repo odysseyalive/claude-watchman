@@ -110,11 +110,8 @@ selfcheck_run() {
         local na; na="$(jq -r '.permissions.allow | length' "$cdir/settings.local.json" 2>/dev/null)"
         [[ -n "$na" && "$na" -gt 0 ]] && _ok "settings.local.json has $na allow rules" || _warn "settings.local.json has no allow rules — run watchman preflight"
     else _warn "settings.local.json absent — run install.sh / watchman preflight"; fi
-    local sud="/etc/sudoers.d/${WATCHMAN_USER:-watchman}"
-    if [[ -e "$sud" ]]; then
-        if [[ -r "$sud" ]]; then _ok "sudoers $sud present ($(grep -c NOPASSWD "$sud" 2>/dev/null) commands)"
-        else _na "sudoers $sud present but unreadable (0440 root) — re-run selfcheck with sudo to inspect"; fi
-    else _warn "sudoers $sud absent — privileged observe (lynis/journalctl) needs it under the loop"; fi
+    if [[ $EUID -eq 0 ]]; then _ok "running as root — reads logs/journal directly (no sudoers needed)"
+    else _warn "not running as root — claude-watchman is designed to run as root so it can read all logs"; fi
 
     # --- mail + auth -------------------------------------------------------
     _hdr "6. Mail & Claude Code"
@@ -131,8 +128,8 @@ selfcheck_run() {
     if command -v df >/dev/null 2>&1; then _ok "df: $(df -P / 2>/dev/null | awk 'NR==2{print $5" used on /"}')"; else _warn "df missing"; fi
     if command -v free >/dev/null 2>&1; then _ok "free: $(free -m 2>/dev/null | awk '/^Mem:/{print $7" MiB available"}')"; else _warn "free missing"; fi
     if command -v journalctl >/dev/null 2>&1; then
-        if journalctl -n1 --no-pager >/dev/null 2>&1; then _ok "journalctl readable by $(id -un) (no sudo needed)"
-        else _warn "journalctl not readable without sudo as $(id -un) — needs sudoers or the systemd-journal group"; fi
+        if journalctl -n1 --no-pager >/dev/null 2>&1; then _ok "journalctl readable by $(id -un)"
+        else _warn "journalctl not readable as $(id -un) — run as root (the intended model)"; fi
     fi
 
     # --- verdict -----------------------------------------------------------
