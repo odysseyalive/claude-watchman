@@ -100,15 +100,23 @@ _pf_abspath() { command -v "$1" 2>/dev/null || printf '/usr/bin/%s' "$1"; }
 # is covered by the journal_read resolver_op's journalctl allow, not a file Read.
 # For every real path we grant its containing directory tree once.
 _pf_resolve_read() {
-    local entry="$1"
-    local val="$entry"   # NB: keep on its own line — `local a=$1 b=$a` does NOT
-                         # populate b from the just-assigned a in bash.
+    local entry="$1" line
+    # A resolver token (a distro.sh function) may emit MULTIPLE absolute paths,
+    # one per line — e.g. webserver_log_paths discovers every log dir on the host.
+    # Emit each valid line; the collation grants Read on every one.
     if [[ "$entry" != /* ]] && declare -F "$entry" >/dev/null 2>&1; then
-        val="$("$entry")"
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            [[ "$line" == journald:* ]] && continue   # not a file path
+            [[ "$line" == /* ]] || continue           # ignore non-absolute/unknown
+            printf '%s\n' "$line"
+        done < <("$entry")
+        return 0
     fi
-    [[ "$val" == journald:* ]] && return 0   # not a file path
-    [[ "$val" == /* ]] || return 0           # ignore anything non-absolute/unknown
-    printf '%s\n' "$val"
+    # Literal path entry.
+    [[ "$entry" == journald:* ]] && return 0
+    [[ "$entry" == /* ]] || return 0
+    printf '%s\n' "$entry"
 }
 
 # --- Collation --------------------------------------------------------------
@@ -122,16 +130,18 @@ preflight_collate() {
     while IFS= read -r m; do
         [[ -r "$m" ]] || continue
 
-        # reads → Read globs + additionalDirectories
+        # reads → Read globs + additionalDirectories. A single read token may
+        # resolve to several paths (e.g. webserver_log_paths), so iterate each.
         local r path dir
         while IFS= read -r r; do
             [[ -n "$r" ]] || continue
-            path="$(_pf_resolve_read "$r")"
-            [[ -n "$path" ]] || continue
-            # If the path is a file, grant its dir; if a dir, grant the dir itself.
-            if [[ -d "$path" ]]; then dir="$path"; else dir="$(dirname "$path")"; fi
-            allow+=("Read(${dir}/**)")
-            adddirs+=("/${dir}")            # doubled leading slash (dir already starts with /)
+            while IFS= read -r path; do
+                [[ -n "$path" ]] || continue
+                # If the path is a file, grant its dir; if a dir, grant it directly.
+                if [[ -d "$path" ]]; then dir="$path"; else dir="$(dirname "$path")"; fi
+                allow+=("Read(${dir}/**)")
+                adddirs+=("/${dir}")        # doubled leading slash (dir already starts with /)
+            done < <(_pf_resolve_read "$r")
         done < <(jq -r '.reads[]?' "$m" 2>/dev/null)
 
         # direct commands

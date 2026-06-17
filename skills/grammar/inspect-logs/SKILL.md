@@ -40,7 +40,10 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 3. **Degrade gracefully.** If `cscli` is missing, journal one `config`/`low`
    finding "CrowdSec not configured — log analysis degraded" with a remediation to
    install it, then fall back:
-   - inbound: scan `$(log_path_webserver)` and `$(log_path_auth)` (or journald via
+   - inbound: scan EVERY directory returned by `$(webserver_log_paths)` — this is
+     config-derived (parsed from each present server's config), so it covers custom
+     `access_log`/`CustomLog` targets, per-vhost logs, and niche servers, NOT just
+     `/var/log/{nginx,apache2,httpd}` — plus `$(log_path_auth)` (or journald via
      `journalctl -u sshd`) for repeated 4xx/401/auth-failure bursts;
    - outbound: `ss -tunp` current connections; compare remote addresses against
      `journal/network-baseline.txt` from `baseline-network`.
@@ -53,7 +56,9 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 
 ## Grounding
 
-- `lib/distro.sh` — `log_path_webserver`, `log_path_auth`.
+- `lib/distro.sh` — `webserver_log_paths` / `webserver_config_roots` / `webserver_detect`
+  (config-derived web-log discovery — scans `/etc` config roots and parses log directives),
+  `log_path_auth`.
 - `lib/profile.sh` — `profile_log_direction`, `profile_severity`.
 - `lib/journal.sh` — `journal_upsert`.
 - `baseline-network` — produces `journal/network-baseline.txt`.

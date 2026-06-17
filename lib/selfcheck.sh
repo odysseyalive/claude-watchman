@@ -55,7 +55,9 @@ selfcheck_run() {
     _ok "auto-update mech   = $(autoupdate_mechanism)"
     _ok "integrity verifier = $(integrity_verifier)"
     _ok "auth log path      = $(log_path_auth)"
-    _ok "webserver log path = $(log_path_webserver)"
+    local _ws; _ws="$(webserver_detect | awk -F'\t' '{printf "%s ", $1}')"
+    _ok "web servers found  = ${_ws:-none detected}"
+    _ok "web log dirs       = $(webserver_log_paths | paste -sd' ' -)"
 
     # --- dependencies (degradation map) ------------------------------------
     _hdr "3. Dependencies"

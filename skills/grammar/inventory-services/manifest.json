@@ -1,7 +1,7 @@
 {
   "skill": "inventory-services",
   "stage": "grammar",
-  "reads": [],
+  "reads": ["webserver_config_roots"],
   "commands": [],
   "resolver_ops": ["pkg_query", "service_status", "net_connections"],
   "fixes": []

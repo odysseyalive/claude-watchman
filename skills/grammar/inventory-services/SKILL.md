@@ -29,8 +29,15 @@ depend on knowing which web server or database is present.
 
 1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`;
    resolve `family`/`profile`.
-2. **Web server.** Detect via `service_status` + `pkg_is_installed` for nginx,
-   apache2/httpd. Record which is active and enabled.
+2. **Web server.** Enumerate EVERY web server present with `webserver_detect` —
+   it scans the `/etc` config roots and packages across nginx, apache (apache2 /
+   httpd), **Caddy, lighttpd, and OpenLiteSpeed**, so niche/non-default builds are
+   not missed. For each, record: its config root, whether the resolved unit is
+   active/enabled (`service_status`/`service_enabled`), and the directories that
+   actually hold its logs via `webserver_log_paths` (parsed from the config —
+   custom `access_log`/`CustomLog` targets and per-vhost logs included — never a
+   bare `/var/log` assumption). This inventory is what tells inspect-logs and the
+   security-header/CORS checks exactly which server, config, and log paths exist.
 3. **Database.** Detect mariadb/mysql, postgresql similarly.
 4. **App runtime.** Detect php-fpm (and its version) and any obvious app server.
 5. **Journal an inventory finding** per discovered service:
@@ -65,7 +72,8 @@ depend on knowing which web server or database is present.
 
 ## Grounding
 
-- `lib/distro.sh` — `service_status`, `service_enabled`, `pkg_is_installed`.
+- `lib/distro.sh` — `webserver_detect` / `webserver_config_roots` / `webserver_log_paths`
+  (config-derived web-server + log discovery), `service_status`, `service_enabled`, `pkg_is_installed`.
 - `lib/journal.sh` — `journal_upsert`.
 - `net_connections` resolver (`ss -H -tln`) — listener addresses for the profile check.
 - `lib/profile.sh` — `profile` (the active profile being sanity-checked).

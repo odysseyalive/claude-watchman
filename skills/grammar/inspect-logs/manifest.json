@@ -1,7 +1,7 @@
 {
   "skill": "inspect-logs",
   "stage": "grammar",
-  "reads": ["log_path_webserver", "log_path_auth"],
+  "reads": ["webserver_log_paths", "webserver_config_roots", "log_path_auth"],
   "commands": [
     { "family": "cscli", "args": "*", "needs_sudo": true }
   ],

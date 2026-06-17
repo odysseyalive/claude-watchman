@@ -160,13 +160,155 @@ log_path_auth() {
     echo "journald:_SYSTEMD_UNIT=sshd.service"   # sentinel: read via journalctl
 }
 
-log_path_webserver() {
-    # Prefer whichever tree exists; both families ship under /var/log.
-    if   [[ -d /var/log/nginx  ]]; then echo /var/log/nginx
-    elif [[ -d /var/log/apache2 ]]; then echo /var/log/apache2     # Debian
-    elif [[ -d /var/log/httpd  ]]; then echo /var/log/httpd        # RHEL
-    else echo /var/log/nginx; fi                                   # default target
+# --- Web server discovery (config-derived, NOT /var/log guesswork) ----------
+# Real deployments put web logs wherever the config says: custom access_log /
+# CustomLog targets, per-vhost logs under sites-enabled/conf.d, niche servers,
+# non-default prefixes. Assuming /var/log/<wellknown> silently misses all of that
+# and blinds inspect-logs. These resolvers instead SCAN the config roots under
+# /etc (and other known roots) to learn which servers are present, then PARSE
+# their configs for the ACTUAL log destinations. All read-only and fail-safe:
+# any parse failure degrades to the well-known dirs, never an error.
+
+# webserver_detect — echo "<server>\t<config_root>" for every web server present
+# (detected by config dir, package, or known service unit). config_root may be
+# empty when only the package/service is found. Covers the niche builds too.
+    # Detection signal: a config dir OR an installed package. Deliberately NOT
+    # `systemctl is-active`, which prints "unknown"/"inactive" for a unit that
+    # does not exist and would false-positive every server (running-vs-stopped is
+    # inventory-services' job, on the resolved unit). Package names vary by family
+    # (Debian apache2 / RHEL httpd / Arch apache).
+webserver_detect() {
+    # nginx
+    if [[ -d /etc/nginx ]] || pkg_is_installed nginx 2>/dev/null; then
+        printf 'nginx\t%s\n' "$([[ -d /etc/nginx ]] && echo /etc/nginx)"
+    fi
+    # apache — Debian ships apache2, RHEL ships httpd, Arch ships apache
+    if   [[ -d /etc/apache2 ]]; then printf 'apache\t%s\n' /etc/apache2
+    elif [[ -d /etc/httpd   ]]; then printf 'apache\t%s\n' /etc/httpd
+    elif pkg_is_installed apache2 2>/dev/null || pkg_is_installed httpd 2>/dev/null \
+        || pkg_is_installed apache 2>/dev/null; then
+        printf 'apache\t\n'
+    fi
+    # caddy
+    if [[ -d /etc/caddy ]] || pkg_is_installed caddy 2>/dev/null; then
+        printf 'caddy\t%s\n' "$([[ -d /etc/caddy ]] && echo /etc/caddy)"
+    fi
+    # lighttpd
+    if [[ -d /etc/lighttpd ]] || pkg_is_installed lighttpd 2>/dev/null; then
+        printf 'lighttpd\t%s\n' "$([[ -d /etc/lighttpd ]] && echo /etc/lighttpd)"
+    fi
+    # openlitespeed / litespeed
+    if   [[ -d /usr/local/lsws/conf ]]; then printf 'litespeed\t%s\n' /usr/local/lsws/conf
+    elif [[ -d /etc/openlitespeed   ]]; then printf 'litespeed\t%s\n' /etc/openlitespeed
+    fi
+    return 0
 }
+
+# webserver_config_roots — just the present config roots, one per line, deduped.
+# Granted Read by the preflight so the in-session skill can re-parse configs.
+webserver_config_roots() {
+    webserver_detect | awk -F'\t' 'NF>=2 && $2!="" {print $2}' | sort -u
+}
+
+# webserver_log_paths — the DIRECTORIES that actually hold web logs on this host,
+# parsed from each present server's config, deduped, one per line. The preflight
+# grants Read on each; inspect-logs scans each. Safety net: any well-known dir
+# that exists is unioned in, and a last-resort default guarantees ≥1 line.
+webserver_log_paths() {
+    local -A seen=()
+    local results=()
+    local WLP_RELBASE=""
+
+    # ${APACHE_LOG_DIR} is set in Debian's envvars (default /var/log/apache2).
+    local apache_log_dir=""
+    [[ -r /etc/apache2/envvars ]] && apache_log_dir="$(
+        grep -hE 'APACHE_LOG_DIR=' /etc/apache2/envvars 2>/dev/null \
+            | tail -1 | sed -E 's/.*APACHE_LOG_DIR=//; s/\$\{[^}]*\}//g; s/["'\'' ]//g')"
+    [[ -n "$apache_log_dir" ]] || apache_log_dir=/var/log/apache2
+
+    _wlp_add() {  # record the dir holding a parsed log target; relies on dynamic scope
+        local p="${1:-}" d
+        [[ -n "$p" ]] || return 0
+        p="${p%;}"; p="${p%\"}"; p="${p#\"}"; p="${p%\'}"; p="${p#\'}"
+        p="${p//\$\{APACHE_LOG_DIR\}/$apache_log_dir}"
+        p="${p//\$APACHE_LOG_DIR/$apache_log_dir}"
+        case "$p" in
+            ''|off|none|stderr|stdout|/dev/*|syslog:*) return 0 ;;
+            '|'*|'$'*|'"'*) return 0 ;;            # pipe sink or unresolved variable
+        esac
+        if [[ "$p" != /* ]]; then                  # relative → resolve against this server's base
+            [[ -n "$WLP_RELBASE" ]] || return 0
+            p="$WLP_RELBASE/$p"
+        fi
+        d="$(dirname "$p")"
+        [[ -n "${seen[$d]:-}" ]] || { seen[$d]=1; results+=("$d"); }
+        return 0
+    }
+    _wlp_add_dir() {  # record a directory directly (no dirname)
+        local d="${1:-}"
+        [[ -n "$d" && -z "${seen[$d]:-}" ]] && { seen[$d]=1; results+=("$d"); }
+        return 0
+    }
+
+    local server root p ar sroot
+    while IFS=$'\t' read -r server root; do
+        [[ -n "$server" ]] || continue
+        case "$server" in
+            nginx)
+                [[ -n "$root" && -d "$root" ]] || root=/etc/nginx
+                WLP_RELBASE="$root"
+                while IFS= read -r p; do _wlp_add "$p"; done < <(
+                    grep -rhE '^[[:space:]]*(access_log|error_log)[[:space:]]+' "$root" 2>/dev/null \
+                        | awk '{print $2}' | sed 's/;.*//' )
+                ;;
+            apache)
+                local aroots=()
+                [[ -n "$root" && -d "$root" ]] && aroots+=("$root")
+                for ar in /etc/apache2 /etc/httpd; do [[ -d "$ar" ]] && aroots+=("$ar"); done
+                for ar in "${aroots[@]}"; do
+                    sroot="$(grep -rhiE '^[[:space:]]*ServerRoot[[:space:]]+' "$ar" 2>/dev/null \
+                                | tail -1 | awk '{print $2}' | tr -d '"')"
+                    [[ -n "$sroot" ]] || sroot="$ar"
+                    WLP_RELBASE="$sroot"
+                    while IFS= read -r p; do _wlp_add "$p"; done < <(
+                        grep -rhiE '^[[:space:]]*(CustomLog|ErrorLog|TransferLog)[[:space:]]+' "$ar" 2>/dev/null \
+                            | awk '{print $2}' )
+                done
+                ;;
+            caddy)
+                [[ -n "$root" && -d "$root" ]] || root=/etc/caddy
+                WLP_RELBASE=""
+                while IFS= read -r p; do _wlp_add "$p"; done < <(
+                    grep -rhE 'output[[:space:]]+file[[:space:]]+' "$root" 2>/dev/null \
+                        | awk '{for(i=1;i<NF;i++) if($i=="file"){print $(i+1); break}}' )
+                ;;
+            lighttpd)
+                [[ -n "$root" && -d "$root" ]] || root=/etc/lighttpd
+                WLP_RELBASE=""
+                while IFS= read -r p; do _wlp_add "$p"; done < <(
+                    grep -rhE '(accesslog\.filename|server\.errorlog)[[:space:]]*=' "$root" 2>/dev/null \
+                        | sed -E 's/.*=[[:space:]]*//' )
+                ;;
+            litespeed)
+                [[ -d /usr/local/lsws/logs ]] && _wlp_add_dir /usr/local/lsws/logs
+                ;;
+        esac
+    done < <(webserver_detect)
+
+    # Safety-net union: well-known dirs that actually exist on disk.
+    for p in /var/log/nginx /var/log/apache2 /var/log/httpd /var/log/caddy /var/log/lighttpd; do
+        [[ -d "$p" ]] && _wlp_add_dir "$p"
+    done
+
+    # Guarantee ≥1 line so callers and the preflight always have a target.
+    (( ${#results[@]} )) || results+=(/var/log/nginx)
+    printf '%s\n' "${results[@]}"
+    return 0
+}
+
+# Back-compat singular: the primary web-log dir (first discovered). Prefer
+# webserver_log_paths in new code — a host can have several.
+log_path_webserver() { webserver_log_paths | head -n1; }
 
 log_path_lynis() { echo /var/log/lynis-report.dat; }
 
