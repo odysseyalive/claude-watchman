@@ -40,8 +40,7 @@ from inside it — it fetches the project file-by-file from a manifest into that
 Use the `bash -c "$(...)"` form so the prompts keep your terminal:
 
 ```bash
-mkdir watchman && cd watchman
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
+mkdir watchman && cd watchman && bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
 ```
 
 Run it as root. It detects your distro and profile, installs dependencies, sets up the
@@ -60,29 +59,32 @@ watchman selfcheck
 
 **2. Run your first audit, in a session.** `audit` and `report` are AI features, so you
 run them *inside* Claude Code — where you watch the work and the token meter. Launch a
-session as root, then type the slash commands:
+session as root (run `/login` once if needed):
 
 ```bash
-claude              # launch Claude Code as root (/login once if needed)
+claude
 ```
-```
-/watchman audit     # observe + analyze, journal findings
-/watchman report    # plain-language summary
-```
+
+Then, inside that session, run `/watchman audit` (observe + analyze, journal findings),
+followed by `/watchman report` (a plain-language summary).
 
 **3. Turn on recurring monitoring.** Keep the loop in a tmux session so it persists but
-stays visible — re-attach any time to watch it work and see its token use:
+stays visible. Start a persistent session:
 
 ```bash
-tmux new -s watchman       # persistent session
-claude                     # launch Claude Code as root (/login once)
-```
-```
-/loop 30m /watchman loop   # start the recurring pass, then Ctrl-b d to detach
+tmux new -s watchman
 ```
 
-The loop observes, journals, and emails you only when something crosses a threshold.
-Re-attach with `tmux attach -t watchman` whenever you want to see what it's doing.
+Inside it, launch Claude as root (`claude`, run `/login` once), then start the recurring
+pass:
+
+```
+/loop 30m /watchman loop
+```
+
+Press `Ctrl-b` then `d` to detach — the loop keeps running. It observes, journals, and
+emails you only when something crosses a threshold. Re-attach with
+`tmux attach -t watchman` whenever you want to see what it's doing.
 
 ## Commands
 
@@ -119,27 +121,29 @@ no service user and no sudoers to manage. Auth is Claude Code's own login; there
 API keys. The AI verbs run in-session on purpose: Claude Code spends tokens on every
 pass, and you should be able to see that happening — never a silent background daemon.
 
-**One-off checks** — launch a session as root and run the slash commands:
+**One-off checks** — launch a session as root:
 
 ```bash
 claude
 ```
-```
-/watchman audit
-/watchman report
-```
 
-**Recurring monitoring** — keep the loop in a tmux session. It persists across logout
-but stays attachable, so you always see what it's doing and what it spends:
+Then, inside the session, run `/watchman audit` and `/watchman report`.
+
+**Recurring monitoring** — keep the loop in a tmux session; it persists across logout but
+stays attachable, so you always see what it's doing and what it spends. Start a persistent
+session:
 
 ```bash
-tmux new -s watchman       # persistent session
-claude                     # launch Claude Code as root (/login once)
+tmux new -s watchman
 ```
+
+Inside it, launch Claude as root (`claude`, run `/login` once), then start the loop:
+
 ```
-/loop 30m /watchman loop   # start the loop, then Ctrl-b d to detach
-tmux attach -t watchman    # re-attach any time to watch it
+/loop 30m /watchman loop
 ```
+
+Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
 
 ## Safety — two seatbelts and a backstop
 
