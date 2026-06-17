@@ -61,7 +61,7 @@ _webstats_awk() {
     function asset(p,   q){ q=p; sub(/\?.*/,"",q);
         return (q ~ /\.(css|js|mjs|png|jpe?g|gif|svg|ico|webp|bmp|woff2?|ttf|eot|otf|map|mp4|webm|mp3|pdf|zip|gz|woff|txt|xml|json)$/) }
     function isbot(u){ return (tolower(u) ~ /bot|crawl|spider|slurp|bingpreview|facebookexternalhit|mediapartners|curl|wget|python-requests|go-http|libwww|httpclient|monitor|uptime|pingdom|headless|phantom|scan|nikto|sqlmap|masscan|zgrab/) }
-    function mnum(m){ return index("JanFebMarAprMayJunJulAugSepOctNovDec", m)/3 + 1 - 1 }
+    function mnum(m){ return (index("JanFebMarAprMayJunJulAugSepOctNovDec", m)-1)/3 + 1 }
     {
         # Portable combined/common-log parse by splitting on the quote char.
         n = split($0, q, "\"")
@@ -158,4 +158,34 @@ webstats_report() {
     echo "  Daily trend (requests/day):"
     printf '%s\n' "$raw" | awk -F'\t' '$1=="D"{print $2"\t"$3"\t"$4}' | sort \
         | awk -F'\t' '{printf "    %s  %6d\n",$3,$2}'
+}
+
+# --- SECURITY PATH: request-rate offenders (DDoS/abuse) ----------------------
+# DIFFERENT legal basis from the analytics above: defending the system. This one
+# deliberately KEEPS the real source IP, because you cannot firewall-block a hash
+# — the offending IP has to be named in the proposed rule. inspect-logs consumes
+# this to journal a `security` finding; the operator-run fixer applies the block
+# under the risk tiers (review). Detection only — NEVER blocks here.
+#
+# Emits one TSV line per source whose PEAK requests-in-a-single-minute reaches the
+# threshold:  <ip>\t<peak_per_min>\t<total_in_logs>\t<user_agent_sample>
+# $1 = per-minute threshold (default: $WATCHMAN_RATE_PER_MIN, else 300).
+webstats_rate_offenders() {
+    local th="${1:-${WATCHMAN_RATE_PER_MIN:-300}}"
+    webstats_cat_logs | awk -v THMIN="$th" '
+    function mnum(m){ return (index("JanFebMarAprMayJunJulAugSepOctNovDec", m)-1)/3 + 1 }
+    {
+        n = split($0, q, "\""); if (n < 1) next
+        split(q[1], h, " "); ip = h[1]
+        dtl = h[4]; gsub(/\[/, "", dtl); split(dtl, dd, ":")   # dd[1]=DD/Mon/YYYY dd[2]=HH dd[3]=MM
+        if (ip == "" || dd[1] == "") next
+        split(dd[1], p, "/")
+        minute = sprintf("%04d%02d%02d%02d%02d", p[3]+0, mnum(p[2]), p[1]+0, dd[2]+0, dd[3]+0)
+        c = ++cnt[ip SUBSEP minute]
+        tot[ip]++
+        if (n >= 6) ua[ip] = q[6]
+        if (c > peak[ip]) peak[ip] = c
+    }
+    END { for (i in peak) if (peak[i] >= THMIN+0) printf "%s\t%d\t%d\t%s\n", i, peak[i], tot[i], ua[i] }
+    ' | sort -t"$(printf '\t')" -k2 -rn
 }

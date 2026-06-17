@@ -173,7 +173,7 @@ deny base beneath them:
 
 | | Server | Workstation |
 |---|--------|-------------|
-| Looks for | Inbound attack surface — exposed ports, web headers, CORS, SSH hardening, probes | What the machine talks *to* — new outbound connections vs. a baseline |
+| Looks for | Inbound attack surface — exposed ports, web headers, CORS, SSH hardening, probes, and request-rate spikes (DDoS/abuse) that propose a firewall block | What the machine talks *to* — new outbound connections vs. a baseline |
 | Top concern | Public-facing exposure | **Log retention** — volatile journald loses the forensic trail on reboot |
 | Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity | |
 

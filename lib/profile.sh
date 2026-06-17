@@ -44,6 +44,7 @@ web_cors_policy:high:-
 firewall_exposed_ports:high:medium
 ssh_hardening:high:medium
 inbound_attack_patterns:high:-
+request_rate_spike:high:-
 outbound_new_connections:-:high
 mac_not_enforcing:medium:low
 autoupdate_not_enabled:high:medium

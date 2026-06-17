@@ -47,11 +47,26 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
      `journalctl -u sshd`) for repeated 4xx/401/auth-failure bursts;
    - outbound: `ss -tunp` current connections; compare remote addresses against
      `journal/network-baseline.txt` from `baseline-network`.
-4. **Journal findings.** Inbound probe clusters → `category=security`; new outbound
+4. **Request-rate spikes (DDoS / abuse) — server profile.** If
+   `profile_runs_check request_rate_spike`: `source lib/webstats.sh` and run
+   `webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the
+   peak requests-in-one-minute from a single source). This reuses the web-stats log
+   parser but — unlike the anonymized `/watchman stats` analytics — **keeps the real
+   offending IP**, because you cannot firewall-block a hash and this is the security
+   path (defending the system, a different legal basis). For each offender, journal:
+   `category=security`, `severity=$(profile_severity request_rate_spike)`,
+   `risk_tier=review`, `check_id=request_rate_spike`, `target=<ip>` (per-IP, so the
+   fingerprint is stable and a returning flooder regresses loudly); detail = the
+   peak/min, total, and UA sample; remediation = `firewall_deny <ip>/32` — shown and
+   confirmed per the risk tiers. Bots/crawlers may appear here; the operator decides
+   (it is `review`, never auto-applied). CrowdSec, when present, is the real-time
+   enforcement layer; this is the log-cadence detector that proposes the rule.
+5. **Journal findings.** Inbound probe clusters → `category=security`; new outbound
    destinations → `category=security`, severity per `profile_severity outbound_new_connections`.
    `check_id` stable per pattern/destination so re-runs update in place.
-5. **Never block or ban.** Enforcement (firewall/ban) is the operator-run fixer's
-   job under the risk tiers — this skill only observes and records.
+6. **Never block or ban.** Enforcement (firewall/ban) is the operator-run fixer's
+   job under the risk tiers — this skill only observes and records. The rate-spike
+   finding PROPOSES the exact `firewall_deny` rule; it never applies it.
 <!-- /origin -->
 
 ## Grounding
@@ -59,6 +74,9 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 - `lib/distro.sh` — `webserver_log_paths` / `webserver_config_roots` / `webserver_detect`
   (config-derived web-log discovery — scans `/etc` config roots and parses log directives),
   `log_path_auth`.
-- `lib/profile.sh` — `profile_log_direction`, `profile_severity`.
+- `lib/webstats.sh` — `webstats_rate_offenders` (the security-path rate detector; keeps the
+  real IP for the firewall proposal — distinct from the anonymized `/watchman stats` report).
+- `lib/profile.sh` — `profile_log_direction`, `profile_severity` (`request_rate_spike`).
 - `lib/journal.sh` — `journal_upsert`.
+- `skills/rhetoric/fix-redflag` — applies the proposed `firewall_deny` (review-tier, confirmed).
 - `baseline-network` — produces `journal/network-baseline.txt`.

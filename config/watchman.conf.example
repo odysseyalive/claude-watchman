@@ -8,7 +8,7 @@
 # Set by install.sh; override here if detection was wrong.
 WATCHMAN_PROFILE=workstation     # server | workstation
 WATCHMAN_FAMILY=                 # debian | rhel | arch  (blank = auto-detect from /etc/os-release)
-WATCHMAN_USER=watchman           # the dedicated system user the tool runs as
+WATCHMAN_USER=root               # claude-watchman runs as root (no dedicated service user)
 
 # --- Loop thresholds --------------------------------------------------------
 # The loop emails only when the delta crosses these. A quiet machine stays quiet.
@@ -20,6 +20,13 @@ WATCHMAN_NOTIFY_ON_NEW_OUTBOUND=yes # (workstation) email on new outbound destin
 WATCHMAN_DISK_WARN_PCT=85           # disk usage % that raises a capacity finding
 WATCHMAN_INODE_WARN_PCT=85
 WATCHMAN_MEM_WARN_PCT=90
+
+# --- Inbound rate / DDoS detection (server) ---------------------------------
+# inspect-logs flags a single source IP whose PEAK requests-in-one-minute (from
+# the web access logs) reaches this, as a high-severity security finding with a
+# ready firewall_deny proposal (review-tier — applied only by `watchman fix`,
+# never the loop). Tune per site: a busy CDN-fronted site may need it higher.
+WATCHMAN_RATE_PER_MIN=300
 
 # --- Safe-tier auto-remediation (opt-in, off by default) --------------------
 # Even when 'yes', this only matters for the operator-run `watchman fix`. The
