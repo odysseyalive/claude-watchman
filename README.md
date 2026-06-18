@@ -118,7 +118,15 @@ claude-watchman splits its verbs on the token line. The ones that spend nothing 
 shell commands; the AI features run inside a Claude Code session as `/watchman <verb>`,
 so their token use is always in front of you.
 
-**Shell CLI** — bash only, no Claude, no tokens:
+**The two halves run in two different places, and they're not interchangeable.** The
+shell verbs (`selfcheck`, `preflight`, `update`) are typed at your **OS terminal** — the
+same prompt where you'd type `ls`, with **no** leading slash. The `/watchman` verbs are
+typed at the **Claude Code prompt**, *inside* a session, **with** the leading slash. Typing
+a shell verb like `watchman update` into the Claude prompt won't update anything — Claude
+will just point you back to your terminal (and vice-versa). When in doubt: no slash → your
+shell; slash → inside `claude`.
+
+**Shell CLI** — bash only, no Claude, no tokens (run at your OS terminal):
 
 | Command | What it does |
 |---------|--------------|
@@ -126,7 +134,7 @@ so their token use is always in front of you.
 | `watchman preflight` | Regenerate the Claude allowlist + the in-session `/watchman` command. |
 | `watchman update` | Re-fetch the latest product (manifest, no git) + regenerate locals. Same as installing. |
 
-**In a Claude Code session** — AI features, visible token use:
+**In a Claude Code session** — AI features, visible token use (typed at the `claude` prompt, with the slash):
 
 | Command | What it does |
 |---------|--------------|
