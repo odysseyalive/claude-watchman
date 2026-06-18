@@ -7,7 +7,7 @@
 > **PRIME DIRECTIVE — it never does anything destructive.** Every skill carries one
 > rule, verbatim: nothing that deletes data, modifies a database, severs access, or
 > stops a service happens without stopping to ask you first. The unattended loop has
-> no one to ask — so it physically cannot reach a destructive step. [How that's enforced →](#safety--three-seatbelts)
+> no one to ask — so it physically cannot reach a destructive step. [How that's enforced →](#safety--two-seatbelts-and-a-backstop)
 
 claude-watchman is a set of Claude Code skills that run one loop: look at the machine,
 write down what's wrong, help you fix it. It only reaches out when the picture changes.
@@ -105,7 +105,7 @@ Inside it, launch Claude as root (`claude`, run `/login` once), then start the r
 pass:
 
 ```
-/loop 30m /watchman loop
+/loop 6h /watchman loop
 ```
 
 Press `Ctrl-b` then `d` to detach — the loop keeps running. It observes, journals, and
@@ -205,7 +205,7 @@ tmux new -s watchman
 Inside it, launch Claude as root (`claude`, run `/login` once), then start the loop:
 
 ```
-/loop 30m /watchman loop
+/loop 6h /watchman loop
 ```
 
 Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
@@ -231,14 +231,18 @@ deny base beneath them:
 
 1. **Risk tiers.** The fixer never auto-applies a `review` or `manual` finding. It shows
    the exact change and confirms per-finding.
-2. **Claude allowlist.** Scoped to read-only observe + report under `dontAsk`, so the
-   loop *cannot* invoke a mutating command — it auto-denies and fails loud.
-3. **Deny base (backstop).** Even running as root, `settings.json` explicitly denies the
-   destructive command patterns — `rm`, `dd`, `mkfs`, `systemctl stop/disable`, anything
-   touching sudoers — and an allow can never override a deny.
+2. **Loop allowlist.** The loop runs under a read-only observe + report profile in
+   `dontAsk` mode, so it *cannot* invoke a mutating command — it auto-denies and fails
+   loud. Remediation lives in a **separate** profile that only `watchman fix` selects.
+3. **Deny base (backstop).** Even running as root, every profile embeds the same deny
+   list — `rm`, `dd`, `mkfs`, `systemctl stop/disable`, anything touching sudoers, plus
+   `Edit`/`Write` of shadow & sudoers — and an allow can never override a deny.
 
 `bypassPermissions` is never used. Remediation only ever happens when **you** run
-`watchman fix`.
+`watchman fix`, which launches a dedicated session in `"default"` mode: safe toggles are
+pre-approved, every other fix prompts per finding (that prompt *is* the confirmation),
+and the deny base above still holds. Maintainers get a third profile via `watchman dev`
+(repo-write, `acceptEdits`) so editing the source never means loosening the live policy.
 
 ## What it watches
 

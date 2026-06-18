@@ -113,7 +113,7 @@ update_check_run() {
     # 2. No machine artifact is tracked.
     printf '\n2. No machine artifact tracked\n'
     local bad
-    bad="$(git ls-files | grep -E '(^|/)(findings\.db|network-baseline\.txt|settings(\.local)?\.json|watchman\.conf)$|(^|/)\.env$' || true)"
+    bad="$(git ls-files | grep -E '(^|/)(findings\.db|network-baseline\.txt|settings(\.local|\.fix|\.dev)?\.json|watchman\.conf)$|(^|/)\.env$' || true)"
     [[ -z "$bad" ]] && _uc_ok "no machine artifact is tracked" || _uc_fail "machine artifacts are tracked:"$'\n'"$bad"
 
     # 3. Manifest in lockstep with the product (no drift on feature submission).

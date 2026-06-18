@@ -4,23 +4,30 @@
 # visible (CLAUDE.md "How it runs").
 #
 #   watchman selfcheck   Direct bash plumbing check (NO Claude, no tokens).
-#   watchman preflight   Regenerate the Claude allowlist + in-session commands (NO Claude).
+#   watchman preflight   Regenerate the Claude permission profiles + in-session commands.
 #   watchman update      Re-fetch the latest product (manifest, NO git) + regenerate locals.
 #                        Same as re-running the installer. 'update --check' = maintainer guard.
+#   watchman fix         LAUNCH a remediation session in the FIX profile (default mode).
+#   watchman dev         LAUNCH a maintainer session in the DEV profile (acceptEdits).
 #
-# The token-spending operations — audit, report, loop, fix, inventory — are NOT shell
-# verbs. They run inside a Claude Code session as `/watchman <verb>`, where you see the
-# work and the token meter. A headless `claude -p` fork would hide that, which is exactly
-# what the tmux model exists to avoid. Typing one of those verbs here prints how to run it.
+# The pure-observe operations — audit, report, loop, inventory — are NOT shell verbs.
+# They run inside a Claude Code session as `/watchman <verb>`, where you see the work
+# and the token meter. Typing one of those here prints how to run it.
+#
+# fix and dev ARE shell verbs, but only as LAUNCHERS: each needs its own permission
+# profile, and Claude Code locks the permission mode at startup, so a verb cannot
+# re-permission the session it is already in. `watchman fix` / `watchman dev` start a
+# fresh session bound to the matching generated profile; the operator works inside it.
 #
 # Recurring monitoring uses Claude Code's built-in /loop inside a re-attachable tmux
 # session — claude-watchman ships NO scheduler:
-#     tmux new -s watchman ; claude ; /loop 30m /watchman loop   (Ctrl-b d to detach)
+#     tmux new -s watchman ; claude ; /loop 6h /watchman loop   (Ctrl-b d to detach)
 #
-# > PRIME DIRECTIVE: this dispatcher never performs destructive actions itself. The AI
-# > verbs it points at each carry the directive inside their SKILL.md, and the loop runs
-# > observe/report only — the dontAsk allowlist makes applying a review/manual fix
-# > impossible without an operator present.
+# > PRIME DIRECTIVE: this dispatcher never performs destructive actions itself — even
+# > the fix/dev verbs only EXEC a Claude Code session bound to a generated profile. The
+# > loop still runs observe/report only (its dontAsk allowlist makes applying a fix
+# > impossible with no operator present); remediation lives in the separate FIX profile,
+# > where "default" mode prompts per finding and the deny base still blocks destruction.
 
 set -euo pipefail
 
@@ -31,24 +38,35 @@ if [[ -L "$_self" ]] && command -v readlink >/dev/null 2>&1; then
 fi
 WATCHMAN_BIN_DIR="$(cd "$(dirname "$_self")" && pwd)"
 export WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$WATCHMAN_BIN_DIR/.." && pwd)}"
+export WATCHMAN_CLAUDE_DIR="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
 
 usage() {
     cat <<'EOF'
-watchman — claude-watchman shell CLI. Two zero-token, bash-only verbs:
+watchman — claude-watchman shell CLI. Zero-token, bash-only verbs:
 
   watchman selfcheck   Direct bash plumbing check (NO Claude) — run this FIRST on any new host.
-  watchman preflight   Regenerate the Claude allowlist + in-session command skills (NO Claude).
+  watchman preflight   Regenerate the Claude permission profiles + in-session commands (NO Claude).
   watchman update      Re-fetch the latest product from the manifest (NO git) + regenerate
                        locals. Same command as installing; never touches your local state.
                        Maintainer subflags: '--check' = release-readiness guard;
                        '--sync' = regenerate manifest.txt from the tracked product.
 
-The AI features run INSIDE a Claude Code session (run `claude` as root, then type):
+Session launchers — each starts Claude Code in its OWN permission profile (because the
+permission mode is fixed at session startup and cannot be changed from inside):
+
+  watchman fix         LAUNCH a remediation session — FIX profile, "default" mode: every
+                       fix prompts per finding (the risk-tier confirmation), safe toggles
+                       are pre-approved, the destructive deny base is retained. Then run
+                       /watchman fix inside it.
+  watchman dev         LAUNCH a maintainer session — DEV profile, acceptEdits: source edits
+                       in the product tree auto-apply (no settings.json hand-edit + restart),
+                       Bash still prompts, deny base retained.
+
+The pure-observe AI features run INSIDE a Claude Code session (run `claude` as root, then type):
 
   /watchman audit       Observe + Analyze: run the grammar+logic skills, journal findings. No fixes.
   /watchman report      Human-readable summary of the journal.
   /watchman loop        ONE pass: observe → journal → correlate delta → conditional send-report.
-  /watchman fix         Interactive remediation, bounded by each finding's risk tier.
   /watchman inventory   What is installed and how it serves.
 
 Running them in-session (not as headless shell forks) is deliberate: Claude Code spends
@@ -58,7 +76,7 @@ Recurring monitoring — claude-watchman ships NO scheduler. Keep the loop in a 
 session (as root) so it persists AND stays visible — re-attach any time:
     tmux new -s watchman      # persistent session
     claude                    # launch Claude Code as root (/login once)
-    /loop 30m /watchman loop  # start the recurring pass
+    /loop 6h /watchman loop  # start the recurring pass
     # Ctrl-b d to detach; 'tmux attach -t watchman' to re-attach
 EOF
     exit "${1:-0}"
@@ -74,9 +92,30 @@ so you can see what it does and what it spends. Launch a session and run the sla
     claude                # as root; /login once if needed
     /watchman $v
 
-(Recurring: '/loop 30m /watchman loop' inside a tmux session — see 'watchman --help'.)
+(Recurring: '/loop 6h /watchman loop' inside a tmux session — see 'watchman --help'.)
 EOF
     exit 2
+}
+
+# fix and dev are AI features too, but they need their OWN permission profile —
+# Claude Code fixes the permission mode at startup and never hot-reloads it, so a
+# verb cannot change the mode of a session it is already inside. The loop's dontAsk
+# read-only session can apply NOTHING; the maintainer cannot edit source. So these
+# two LAUNCH a fresh session bound to the matching generated profile, and the
+# operator then runs the slash command inside it. (preflight generates the files.)
+_launch_session() {
+    local file="$1" mode="$2" note="$3" hint="$4"
+    local settings="$WATCHMAN_CLAUDE_DIR/$file"
+    command -v claude >/dev/null 2>&1 || {
+        echo "watchman: the 'claude' CLI is not on PATH — install Claude Code first." >&2; exit 1; }
+    [[ -f "$settings" ]] || {
+        echo "watchman: $file not found — run 'watchman preflight' to generate it." >&2; exit 1; }
+    cat >&2 <<EOF
+watchman: $note
+Launching a Claude Code session in this profile. Inside it, run:  $hint
+EOF
+    cd "$WATCHMAN_ROOT" || exit 1
+    exec claude --permission-mode "$mode" --settings "$settings"
 }
 
 verb="${1:-}"; shift || true
@@ -112,7 +151,22 @@ case "$verb" in
         esac
         ;;
 
-    audit|report|loop|fix|inventory) _redirect_to_session "$verb" ;;
+    audit|report|loop|inventory) _redirect_to_session "$verb" ;;
+
+    fix)
+        # Operator-run remediation. Needs the FIX profile: "default" mode (per-finding
+        # prompts = the risk-tier confirmation) + the safe-tier mutating allowlist, with
+        # the destructive deny base retained. The loop's dontAsk session can't do this.
+        _launch_session settings.fix.json default \
+            "remediation session — per-finding prompts, safe fixes pre-approved, destructive ops denied." \
+            "/watchman fix" ;;
+
+    dev)
+        # Maintainer session: acceptEdits + repo-write, so editing the product no longer
+        # means hand-editing settings.json and restarting. Destructive deny base retained.
+        _launch_session settings.dev.json acceptEdits \
+            "maintainer session — source edits in $WATCHMAN_ROOT auto-apply; Bash still prompts." \
+            "your editing / development work (no /watchman verb required)" ;;
 
     ""|-h|--help|help) usage 0 ;;
     *) echo "watchman: unknown verb '$verb'" >&2; echo; usage 2 ;;

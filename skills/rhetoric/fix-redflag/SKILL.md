@@ -10,8 +10,11 @@ allowed-tools: Read, Glob, Grep, Bash, Edit, Write
 Remediates findings and updates their status. This is the only skill that changes
 system state, so the Prime Directive governs it most directly: its destructive-action
 gate **is** the Prime Directive, layered on top of — never instead of — the risk
-tiers. Operator-run only (`/watchman fix`); its mutating commands are deliberately
-absent from the loop's `dontAsk` allowlist, so the loop cannot apply them.
+tiers. Operator-run only, in a FIX-profile session launched with `watchman fix`
+(`.claude/settings.fix.json`, "default" mode): safe-tier ops are pre-approved, every
+other mutating step prompts per finding, and the deny base still blocks destruction.
+Its mutating commands are deliberately absent from the loop's `dontAsk` allowlist, so
+the unattended loop cannot apply them — only the operator-launched fix session can.
 
 > **PRIME DIRECTIVE (outranks everything below).** Do nothing destructive. If any action
 > would delete or overwrite a file or directory, modify a database in any way, sever access
@@ -70,4 +73,7 @@ For every finding, behavior is bounded by its `risk_tier` — never widened:
 - `lib/journal.sh` — `journal_set_status`, finding reads.
 - `lib/distro.sh` — `firewall_allow`/`firewall_deny`/`firewall_list`, `service_*` (all MUTATING; shown-and-confirmed).
 - `lib/profile.sh` — `profile_allows_safe_batch`.
-- `manifest.json` — note `fixes` is documented but NEVER granted to the loop.
+- `manifest.json` — each `fixes[]` op carries a `risk_tier`. preflight is tier-aware:
+  `safe` ops are granted in the FIX profile's allowlist (pre-approved); `review` ops are
+  left OUT so "default" mode prompts per finding; `manual` is never granted. The loop's
+  read-only profile is granted NONE of them.

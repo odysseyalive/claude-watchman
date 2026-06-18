@@ -75,10 +75,18 @@ only through `lib/journal.sh`. Make no changes.
    nothing.
 
 This pass is OBSERVE + REPORT ONLY — never apply a fix. (For unattended cadence, the
-operator drives this with Claude Code's `/loop 30m /watchman loop` inside a tmux session
+operator drives this with Claude Code's `/loop 6h /watchman loop` inside a tmux session
 they can re-attach to.)
 
 ## fix — Interactive remediation, bounded by risk tier
+
+**Run this in a FIX-profile session, launched from the shell with `watchman fix`** — NOT
+the loop's read-only `dontAsk` session, where every mutating command auto-denies and the
+fixer can apply nothing. The launcher binds the session to `.claude/settings.fix.json`
+("default" mode): safe-tier ops are pre-approved, every other mutating step prompts (that
+prompt IS the risk-tier confirmation), and the destructive deny base still blocks
+`rm`/`dd`/`systemctl stop`/sudoers. If you find mutations silently denied here, you are in
+the wrong session — exit and relaunch with `watchman fix`.
 
 Execute `skills/rhetoric/fix-redflag/SKILL.md` exactly. For each finding, act STRICTLY
 within its `risk_tier`: `safe` on simple approval; `review` only after showing the exact

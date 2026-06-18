@@ -8,22 +8,34 @@
 #
 #   skills/<stage>/<name>/manifest.json   (the single source of truth)
 #        │  collated here, resolved through lib/distro.sh + lib/profile.sh
-#        └─► .claude/settings.local.json   what the AGENT may invoke
+#        ├─► .claude/settings.local.json   LOOP/audit allowlist (read-only)
+#        ├─► .claude/settings.fix.json     FIX profile (default mode, + safe fix ops)
+#        └─► .claude/settings.dev.json     maintainer profile (acceptEdits, repo write)
 #
 # claude-watchman runs as ROOT (CLAUDE.md "How it runs"), so there is no
 # separate watchman user and no OS sudoers file — root invokes the read/observe
 # commands directly. The safety boundary is therefore the Claude permission
-# layer alone: the deny base in settings.json blocks destructive command
-# patterns even as root, and under dontAsk anything not in `allow` auto-denies.
+# layer alone: the deny base blocks destructive command patterns even as root.
 #
-# Scope: the generated allowlist covers ONLY read-only Observe/Analyze and the
-# report/email path. It deliberately does NOT grant the fixer's mutating actions
-# (firewall_*, service_*, config edits) — under dontAsk those auto-deny, so the
-# loop physically cannot apply a review/manual remediation. That is the second
-# seatbelt; the deny base is the backstop beneath it.
+# THREE permission profiles, one shared deny base (_pf_deny_base, the backstop):
 #
-# This script writes settings.local.json and NEVER clobbers an existing base
-# settings.json (fixed policy the operator may tune).
+#   * LOOP/audit  — settings.json (dontAsk) + settings.local.json. Read-only
+#     Observe/Analyze + report/email ONLY. The mutating fixer ops are deliberately
+#     ABSENT, and under dontAsk anything not in `allow` auto-denies — so the
+#     unattended loop physically cannot apply a remediation. Second seatbelt.
+#   * FIX  — settings.fix.json, "default" mode. The read-only allowlist PLUS the
+#     manifests' SAFE-tier fix ops. review-tier ops are intentionally left OUT so
+#     "default" mode PROMPTS per finding — the confirmation the risk tiers require.
+#     manual-tier is never granted. Selected by `watchman fix`'s launcher.
+#   * DEV  — settings.dev.json, acceptEdits. Repo-write for maintainers, so editing
+#     source no longer means hand-editing settings.json + restarting. `watchman dev`.
+#
+# The deny base is RETAINED in all three (rm/dd/systemctl stop/disable/sudoers,
+# plus Edit/Write of shadow & sudoers) — an allow can never override a deny.
+#
+# settings.json (the base) is NEVER clobbered if present (operator may tune it);
+# settings.local.json / settings.fix.json / settings.dev.json are regenerated each
+# run from the manifests.
 
 set -o pipefail
 _PF_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,6 +122,42 @@ _pf_expand_resolver_op() {
 }
 
 _pf_abspath() { command -v "$1" 2>/dev/null || printf '/usr/bin/%s' "$1"; }
+
+# --- fix_op expansion (FIX profile only) ------------------------------------
+# A manifest's fixes[] entry declares a LOGICAL mutating op + its risk_tier; this
+# maps each to the concrete allow rule(s) for THIS family, mirroring the read-only
+# _pf_expand_resolver_op. Output lines are TSV:  <allow-rule>\t<additional-dir-or->
+# The allow-rule is a full permission entry (Bash(...) OR Edit/Write(...)), not just
+# the Bash args, because a config edit is an Edit, not a shell command. Only SAFE-tier
+# ops are ever fed here (see _pf_collate_fix) — review-tier ops are deliberately not
+# granted so "default" mode prompts for them per finding.
+_pf_expand_fix_op() {
+    local op="$1"
+    case "$op" in
+        firewall_allow)
+            case "$(watchman_firewall_backend)" in
+                ufw)       printf 'Bash(sudo ufw allow *)\t-\n' ;;
+                firewalld) printf 'Bash(sudo firewall-cmd --permanent --add-port=*)\t-\n'
+                           printf 'Bash(sudo firewall-cmd --reload)\t-\n' ;;
+                *)         : ;;   # nftables: operator-authored; resolver refuses to guess
+            esac ;;
+        firewall_deny)
+            case "$(watchman_firewall_backend)" in
+                ufw)       printf 'Bash(sudo ufw deny *)\t-\n' ;;
+                firewalld) printf 'Bash(sudo firewall-cmd --permanent --remove-port=*)\t-\n'
+                           printf 'Bash(sudo firewall-cmd --reload)\t-\n' ;;
+                *)         : ;;
+            esac ;;
+        service_enable)  printf 'Bash(sudo systemctl enable --now *)\t-\n' ;;
+        service_restart) printf 'Bash(sudo systemctl restart *)\t-\n' ;;
+        config_edit)     # config files live under /etc; grant Edit (modify) + Write (create,
+                         # e.g. a new /etc/logrotate.d entry). Crown-jewel files stay denied
+                         # by the deny base (shadow / sudoers), which an allow cannot override.
+                         printf 'Edit(/etc/**)\t/etc\n'
+                         printf 'Write(/etc/**)\t/etc\n' ;;
+        *) echo "preflight: unknown fix_op '$op'" >&2 ;;
+    esac
+}
 
 # --- reads resolution -------------------------------------------------------
 # A read entry is either a resolver token (a function in distro.sh, e.g.
@@ -199,6 +247,69 @@ preflight_collate() {
     printf '%s\n' "${sudoers[@]}" | awk 'NF' | sort -u > "$WATCHMAN_ROOT/.pf.sudoers"
 }
 
+# --- FIX-profile collation --------------------------------------------------
+# Walk every manifest's fixes[] and accumulate the allow rules + extra dirs that
+# the FIX profile grants ON TOP OF the read-only allowlist. TIER-AWARE: only
+# `safe`-tier ops are granted (they apply without a permission prompt); `review`
+# ops are deliberately omitted so "default" mode prompts per finding, and `manual`
+# is never granted. The dir convention mirrors preflight_collate's doubled leading
+# slash ("/${dir}" where dir already starts with /), so additionalDirectories match.
+_pf_collate_fix() {
+    local -a allow=() dirs=()
+    local m op tier rule dir
+    while IFS= read -r m; do
+        [[ -r "$m" ]] || continue
+        while IFS=$'\t' read -r op tier; do
+            [[ -n "$op" ]] || continue
+            [[ "$tier" == "safe" ]] || continue   # tier-aware: safe ops only
+            while IFS=$'\t' read -r rule dir; do
+                [[ -n "$rule" ]] || continue
+                allow+=("$rule")
+                [[ -n "$dir" && "$dir" != "-" ]] && dirs+=("/${dir}")
+            done < <(_pf_expand_fix_op "$op")
+        done < <(jq -r '.fixes[]? | [.op, (.risk_tier // "manual")] | @tsv' "$m" 2>/dev/null)
+    done < <(find "$WATCHMAN_ROOT/skills" -mindepth 3 -maxdepth 3 -name manifest.json 2>/dev/null | sort)
+
+    printf '%s\n' "${allow[@]}" | awk 'NF' | sort -u > "$WATCHMAN_ROOT/.pf.fix.allow"
+    printf '%s\n' "${dirs[@]}"  | awk 'NF' | sort -u > "$WATCHMAN_ROOT/.pf.fix.dirs"
+}
+
+# --- Deny base (the backstop, shared by ALL profiles) -----------------------
+# One declaration of the destructive-action denylist, emitted one rule per line.
+# Every generated profile (loop/fix/dev) embeds this verbatim so the backstop can
+# never drift between them. An allow can never override a deny, so even the fix
+# profile's Edit(/etc/**) grant cannot touch the crown-jewel files denied here.
+_pf_deny_base() {
+    printf '%s\n' \
+        'Read(.env)' \
+        'Read(./.env)' \
+        'Bash(rm *)' \
+        'Bash(rm -rf *)' \
+        'Bash(sudo rm *)' \
+        'Bash(dd *)' \
+        'Bash(mkfs *)' \
+        'Bash(mkfs.*)' \
+        'Bash(shutdown *)' \
+        'Bash(reboot *)' \
+        'Bash(systemctl stop *)' \
+        'Bash(systemctl disable *)' \
+        'Bash(sudo systemctl stop *)' \
+        'Bash(sudo systemctl disable *)' \
+        'Bash(userdel *)' \
+        'Bash(usermod *)' \
+        'Bash(passwd *)' \
+        'Bash(visudo *)' \
+        'Bash(* /etc/sudoers*)' \
+        'Edit(/etc/shadow)' \
+        'Edit(/etc/gshadow)' \
+        'Edit(/etc/sudoers)' \
+        'Edit(/etc/sudoers.d/**)' \
+        'Write(/etc/shadow)' \
+        'Write(/etc/gshadow)' \
+        'Write(/etc/sudoers)' \
+        'Write(/etc/sudoers.d/**)'
+}
+
 # --- Base policy (fixed, not manifest-derived) ------------------------------
 # Written to <claude>/settings.json ONLY if absent — never clobbered, since the
 # operator may tune it. defaultMode dontAsk: anything in allow runs, everything
@@ -211,34 +322,12 @@ preflight_write_base_settings() {
         echo "preflight: base settings.json exists — leaving it untouched." >&2
         return 0
     fi
-    cat >"$target" <<'JSON'
-{
-  "permissions": {
-    "defaultMode": "dontAsk",
-    "deny": [
-      "Read(.env)",
-      "Read(./.env)",
-      "Bash(rm *)",
-      "Bash(rm -rf *)",
-      "Bash(sudo rm *)",
-      "Bash(dd *)",
-      "Bash(mkfs *)",
-      "Bash(mkfs.*)",
-      "Bash(shutdown *)",
-      "Bash(reboot *)",
-      "Bash(systemctl stop *)",
-      "Bash(systemctl disable *)",
-      "Bash(sudo systemctl stop *)",
-      "Bash(sudo systemctl disable *)",
-      "Bash(userdel *)",
-      "Bash(usermod *)",
-      "Bash(passwd *)",
-      "Bash(visudo *)",
-      "Bash(* /etc/sudoers*)"
-    ]
-  }
-}
-JSON
+    local deny; deny="$(_pf_deny_base)"
+    jq -n --arg deny "$deny" '
+      {permissions: {
+         defaultMode: "dontAsk",
+         deny: ($deny | split("\n") | map(select(length>0)))
+      }}' > "$target"
     echo "preflight: wrote base policy $target" >&2
 }
 
@@ -255,6 +344,57 @@ preflight_write_local_settings() {
          additionalDirectories: ($dirs | split("\n") | map(select(length>0)))
       }}' > "$target"
     echo "preflight: wrote agent allowlist $target ($(jq '.permissions.allow|length' "$target") allow rules)" >&2
+}
+
+# --- Emit settings.fix.json (the FIX profile) -------------------------------
+# Regenerated every run (like settings.local.json). "default" mode: allow rules
+# auto-run, deny rules block, EVERYTHING ELSE PROMPTS — and that prompt is the
+# per-finding confirmation the review tier requires. allow = the read-only loop
+# allowlist (.pf.allow) PLUS the SAFE-tier fix ops (.pf.fix.allow); review ops are
+# absent on purpose. The shared deny base is retained as the backstop. Selected by
+# `watchman fix`, which launches a fresh session bound to this file.
+preflight_write_fix_settings() {
+    local claude_dir="$1" target="$1/settings.fix.json"
+    mkdir -p "$claude_dir"
+    local allow dirs deny
+    allow="$(cat "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.fix.allow" 2>/dev/null | awk 'NF' | sort -u)"
+    dirs="$(cat "$WATCHMAN_ROOT/.pf.dirs"  "$WATCHMAN_ROOT/.pf.fix.dirs"  2>/dev/null | awk 'NF' | sort -u)"
+    deny="$(_pf_deny_base)"
+    jq -n --arg allow "$allow" --arg dirs "$dirs" --arg deny "$deny" '
+      {permissions: {
+         defaultMode: "default",
+         deny:  ($deny  | split("\n") | map(select(length>0))),
+         allow: ($allow | split("\n") | map(select(length>0))),
+         additionalDirectories: ($dirs | split("\n") | map(select(length>0)))
+      }}' > "$target"
+    echo "preflight: wrote fix profile $target ($(jq '.permissions.allow|length' "$target") allow rules, default mode)" >&2
+}
+
+# --- Emit settings.dev.json (the maintainer profile) ------------------------
+# acceptEdits: file edits inside the repo auto-apply (no settings.json hand-edit +
+# restart dance), while Bash still prompts and the deny base still blocks the
+# destructive patterns. Scoped to the product tree, not the host. `watchman dev`.
+preflight_write_dev_settings() {
+    local claude_dir="$1" target="$1/settings.dev.json"
+    mkdir -p "$claude_dir"
+    local deny root allow; deny="$(_pf_deny_base)"; root="$WATCHMAN_ROOT"
+    allow="$(printf '%s\n' \
+        "Read(${root}/**)" \
+        "Edit(${root}/**)" \
+        "Write(${root}/**)" \
+        'Bash(git *)' \
+        'Bash(jq *)' \
+        'Bash(shellcheck *)' \
+        'Bash(sqlite3 *)' \
+        'Skill(watchman)')"
+    jq -n --arg allow "$allow" --arg deny "$deny" --arg root "$root" '
+      {permissions: {
+         defaultMode: "acceptEdits",
+         deny:  ($deny  | split("\n") | map(select(length>0))),
+         allow: ($allow | split("\n") | map(select(length>0))),
+         additionalDirectories: [$root]
+      }}' > "$target"
+    echo "preflight: wrote dev profile $target (acceptEdits, repo-write)" >&2
 }
 
 # --- Deploy in-session command skills ---------------------------------------
@@ -287,10 +427,14 @@ preflight_deploy_commands() {
 preflight_run() {
     command -v jq >/dev/null 2>&1 || { echo "preflight: jq is required (install.sh adds it)." >&2; return 1; }
     preflight_collate
+    _pf_collate_fix
     preflight_write_base_settings  "$WATCHMAN_CLAUDE_DIR"
     preflight_write_local_settings "$WATCHMAN_CLAUDE_DIR"
+    preflight_write_fix_settings   "$WATCHMAN_CLAUDE_DIR"
+    preflight_write_dev_settings   "$WATCHMAN_CLAUDE_DIR"
     preflight_deploy_commands
-    rm -f "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.dirs" "$WATCHMAN_ROOT/.pf.sudoers"
+    rm -f "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.dirs" "$WATCHMAN_ROOT/.pf.sudoers" \
+          "$WATCHMAN_ROOT/.pf.fix.allow" "$WATCHMAN_ROOT/.pf.fix.dirs"
 }
 
 # Allow running directly: `bash lib/preflight.sh`

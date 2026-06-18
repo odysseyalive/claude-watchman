@@ -330,7 +330,7 @@ always SEE what it does and what tokens it spends (no silent background daemon):
 
      tmux new -s watchman       # start a persistent session
      claude                     # launch Claude Code as root (/login once)
-     /loop 30m /watchman loop   # start the recurring pass inside that session
+     /loop 6h /watchman loop   # start the recurring pass inside that session
      # Ctrl-b then d            # detach — the loop keeps running, visible on re-attach
      tmux attach -t watchman    # re-attach any time to watch it / read token use
 
