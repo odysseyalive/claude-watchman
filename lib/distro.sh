@@ -110,7 +110,7 @@ pkg_db_age_days() {
     local f="" now
     case "$(watchman_family)" in
         debian) f="/var/lib/apt/periodic/update-success-stamp"; [[ -e "$f" ]] || f="/var/cache/apt/pkgcache.bin" ;;
-        arch)   f="$(ls -1t /var/lib/pacman/sync/*.db 2>/dev/null | head -1)" ;;
+        arch)   f="$(ls -1t /var/lib/pacman/sync/*.db 2>/dev/null | head -1 || true)" ;;
         rhel)   f="/var/cache/dnf" ;;
     esac
     [[ -n "$f" && -e "$f" ]] || { echo -1; return; }

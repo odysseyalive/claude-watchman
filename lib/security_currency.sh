@@ -28,7 +28,10 @@ seccur_scan() {
     cmd="$(security_update_cmd)"
 
     # 1. Package metadata staleness — a stale DB makes "0 updates pending" a lie.
-    local dbage; dbage="$(pkg_db_age_days)"
+    # NB: package commands have quirky exit codes (pacman -Qu = 1 when none pending;
+    # dnf check-update = 100 when updates exist), so every capture below ends in
+    # `|| true` to stay correct under the caller's `set -euo pipefail`.
+    local dbage; dbage="$(pkg_db_age_days 2>/dev/null || echo -1)"
     if [[ "$dbage" =~ ^[0-9]+$ ]] && (( dbage > update_stale )); then
         _sc_emit config medium manual pkg_db_stale package-db \
             "Package metadata not refreshed in ${dbage} days" \
@@ -38,8 +41,8 @@ seccur_scan() {
 
     # 2. Pending updates (read from CACHED state — no network sync here).
     local upg n
-    upg="$(pkg_list_upgradable 2>/dev/null | awk 'NF')"
-    n="$(printf '%s\n' "$upg" | awk 'NF' | wc -l | tr -d ' ')"
+    upg="$(pkg_list_upgradable 2>/dev/null | awk 'NF' || true)"
+    n="$(printf '%s\n' "$upg" | awk 'NF' | wc -l | tr -d ' ' || true)"
     if (( n > 0 )); then
         _sc_emit security medium review security_updates_pending packages \
             "${n} package update(s) available" \
@@ -60,8 +63,8 @@ seccur_scan() {
                     "$(pkg_install_cmd) $vp"
             fi ;;
         *)
-            local v vn; v="$(vuln_scan 2>/dev/null | awk 'NF')"
-            vn="$(printf '%s\n' "$v" | awk 'NF' | wc -l | tr -d ' ')"
+            local v vn; v="$(vuln_scan 2>/dev/null | awk 'NF' || true)"
+            vn="$(printf '%s\n' "$v" | awk 'NF' | wc -l | tr -d ' ' || true)"
             if (( vn > 0 )); then
                 _sc_emit security high review vuln_packages cve \
                     "${vn} package(s) with known vulnerabilities" \
@@ -85,7 +88,7 @@ seccur_scan() {
     # 5. Threat-intel freshness (only for tools that are present).
     if command -v freshclam >/dev/null 2>&1 || command -v clamscan >/dev/null 2>&1; then
         local cvd age
-        cvd="$(ls -1t /var/lib/clamav/*.cvd /var/lib/clamav/*.cld 2>/dev/null | head -1)"
+        cvd="$(ls -1t /var/lib/clamav/*.cvd /var/lib/clamav/*.cld 2>/dev/null | head -1 || true)"
         if [[ -n "$cvd" ]]; then
             age=$(( ( $(date +%s) - $(stat -c%Y "$cvd" 2>/dev/null || date +%s) ) / 86400 ))
             (( age > stale_days )) && _sc_emit security medium review clamav_sig_stale clamav \
