@@ -40,7 +40,10 @@ persisting across boots — see `check-log-retention`.
    `io_run sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
 4. **Identify victim and hog.** From the OOM message extract the killed process and
    the memory consumer. Correlate with `check-capacity`'s `memory_pressure` finding.
-5. **Journal a finding** `check_id=oom_recent_kill`, `category=capacity`,
+5. **Journal a finding** `check_id=oom_recent_kill`, `target=<victim unit name>` —
+   the systemd unit of the killed process (`mysqld`), never a PID or a `pid 3614`
+   string: PIDs change every boot, so a PID-bearing target duplicates the finding
+   each run instead of folding it. `category=capacity`,
    `severity=high`, `risk_tier=review` (the fix touches service config), with a
    concrete remediation suggestion: protect the victim with
    `OOMScoreAdjust=` or cap the offender with a cgroup `MemoryMax=`. Put the exact

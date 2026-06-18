@@ -39,8 +39,12 @@ often need fixing — surface them clearly.
 4. **logrotate.** Is logrotate installed and is `/etc/logrotate.conf` +
    `/etc/logrotate.d/` present and non-empty? Missing rotation for active log files
    ⇒ `check_id=log_rotation_missing`, `risk_tier=safe`.
-5. **Journal each** with a clear plain-language `detail` of what is lost if
-   unaddressed. Never edit these configs here — that is `fix-redflag` (all `safe`-tier).
+5. **Journal each** with `target=""` — each `check_id` above is already unique per
+   subject, so an empty target keeps the fingerprint stable across runs; do NOT slug a
+   description into target, as a model-invented value varies run-to-run and duplicates
+   the finding instead of folding it. Give a clear plain-language `detail` of what is
+   lost if unaddressed. Never edit these configs here — that is `fix-redflag` (all
+   `safe`-tier).
 <!-- /origin -->
 
 ## Grounding

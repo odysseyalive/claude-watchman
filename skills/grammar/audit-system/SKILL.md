@@ -59,7 +59,11 @@ hardening picture and track the Lynis hardening index as a trend.
    - risk tier: default `manual` (Lynis suggestions are usually context-specific);
      only mark `safe` for unambiguous toggles;
    - `journal_upsert "$family" "$profile" "$category" "$severity" "$risk_tier" \
-       "lynis_<test-id>" "$target" "$title" "$detail" "$remediation"`.
+       "lynis_<test-id>" "" "$title" "$detail" "$remediation"` — pass `target=""`.
+     The `lynis_<test-id>` in `check_id` is already the stable per-finding key, so an
+     empty target keeps the fingerprint identical across runs. Do NOT slug the title
+     or description into target: a model-invented target varies run-to-run and the
+     finding duplicates instead of folding.
 5. **Never remediate here.** Hand fixes to `fix-redflag`. Re-running must update
    findings in place (the fingerprint guarantees no duplicates).
 <!-- /origin -->

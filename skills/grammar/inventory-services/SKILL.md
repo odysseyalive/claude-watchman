@@ -42,8 +42,11 @@ depend on knowing which web server or database is present.
 4. **App runtime.** Detect php-fpm (and its version) and any obvious app server.
 5. **Journal an inventory finding** per discovered service:
    `category=config`, `severity=info`, `risk_tier=safe`,
-   `check_id=service_<name>`, `target=<unit>`, title/detail describing version and
-   enabled/active state. These `info` rows are context, not alarms.
+   `check_id=service_<name>`, `target=<bare unit name>` — the unit WITHOUT the
+   `.service` suffix (`nginx`, never `nginx.service`), so the fingerprint is identical
+   every run; a suffix that comes and goes run-to-run duplicates the finding instead
+   of folding it. Title/detail describe version and enabled/active state. These `info`
+   rows are context, not alarms.
 6. **Profile sanity-check (mismatch finding).** Compare the discovered surface against
    the active `profile`. The dangerous direction is a **`workstation` profile that is
    actually serving the public** — because the server-only checks (security headers,
