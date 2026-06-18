@@ -157,6 +157,19 @@ loop logs "unconfigured" and skips sending instead of crashing, so you can run `
 you fill it in. `.env` is gitignored and is the single source of mail credentials; the
 committed `.env.example` is only a placeholder template.
 
+Once `.env` is filled in, prove delivery end to end before you trust the loop to reach
+you — `watchman testmail` authenticates to your relay and sends one test message to
+`REPORT_EMAIL`:
+
+```bash
+watchman testmail
+```
+
+It's a zero-token shell verb (no Claude), it changes nothing on the system, and it's
+loud on failure: if mail is unconfigured or `msmtp` isn't installed it tells you exactly
+what to fix rather than skipping quietly. A success means a message is on its way — check
+the inbox (and the spam folder).
+
 ## Commands
 
 claude-watchman splits its verbs on the token line. The ones that spend nothing are
@@ -178,6 +191,7 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `watchman selfcheck` | Bash-only plumbing check. Run first on any new host. |
 | `watchman preflight` | Regenerate the Claude allowlist + the in-session `/watchman` command. |
 | `watchman update` | Re-fetch the latest product (manifest, no git) + regenerate locals. Same as installing. |
+| `watchman testmail` | Send one test email to prove your `.env` SMTP creds + `msmtp` deliver to `REPORT_EMAIL`. Loud on failure; changes nothing on the system. |
 | `watchman uninstall` | Remove claude-watchman in tiers, each confirmed (default No): unlink the CLI, drop generated artifacts, then — only if you confirm — your data/secrets and the product files. Never removes packages; never deletes the directory wholesale. `--yes` to auto-confirm. |
 | `watchman safe` | **Launcher** (spends nothing itself): opens a Claude session in the watchman directory under the default read-only profile — the easy way to start Claude in the same context. Observe only; it can apply nothing. |
 | `watchman audit` | **Launcher**: opens a read-only session (default profile) already running `/watchman audit`. |
