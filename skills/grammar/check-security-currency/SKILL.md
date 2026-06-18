@@ -49,6 +49,13 @@ current defenses too.
    and stats local threat-intel files; it emits one TSV finding-candidate per staleness
    signal: `category \t severity \t risk_tier \t check_id \t target \t title \t detail \t remediation`.
    No output = the defenses look current.
+   On Darwin, note the following resolver behavior:
+   - `pkg_db_age_days` measures days since last `brew update` (via Homebrew git FETCH_HEAD).
+   - `autoupdate_enabled` checks macOS Software Update preferences (`com.apple.SoftwareUpdate AutomaticCheckEnabled`).
+   - `vuln_scanner` returns `none` on Darwin — there is no CVE scanner for Homebrew packages
+     currently; note this gap to the operator in the detail of any `security_currency` finding.
+   - `pkg_list_upgradable` uses `brew outdated --formula`.
+   - The update command (`security_update_cmd`) is `brew upgrade && softwareupdate --install --all`.
 3. **Journal each record** through `lib/journal.sh` exactly as emitted:
    `journal_upsert "$family" "$profile" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
    `target` is the subject (packages / cve / clamav / a mechanism) so the fingerprint is
@@ -56,10 +63,11 @@ current defenses too.
 4. **Tiers — never apply.** `security_updates_pending`, `vuln_packages`, `auto_security_updates_off`,
    `*_stale` are `review` (the fixer shows the exact update command and confirms);
    `pkg_db_stale` and `aide_db_missing` are `manual` (investigate / initialize). NEVER run an
-   update, install, or `apt update`/`pacman -Sy` here — propose the command, the operator
-   decides. Applying is `fix-redflag`'s job under the risk tiers.
-5. **Summarize.** Lead with the highest-severity currency gap (a known-CVE package, or
-   auto-updates being off) and the one-line action; if clean, say the defenses look current.
+   update, install, or any package sync here — propose the command, the operator decides.
+5. **Summarize.** Lead with the highest-severity currency gap and the one-line action. On
+   Darwin, if `vuln_scanner=none`, note that CVE scanning for Homebrew packages is not
+   available and recommend periodically reviewing `brew audit --cask` manually. If clean,
+   say the defenses look current.
 <!-- /origin -->
 
 ## Grounding

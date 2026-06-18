@@ -129,35 +129,57 @@ confirm() {
 # Positive score → server, tie/negative → workstation (the quieter, safer default).
 _profile_guess() {
     local score=0; local -a reasons=()
+    local _fam; _fam="$(watchman_family)"
 
     # Strong server signal: something listening on a NON-loopback address.
-    # ss is in iproute2 (near-universal); judge by address:port only (no root needed).
-    local pub
-    pub="$(ss -H -tln 2>/dev/null | awk '{print $4}' \
-            | grep -Ev '^127\.|^\[::1\]' \
-            | grep -E ':(22|25|80|443|3306|5432)' | tr '\n' ' ' || true)"
+    # ss (Linux) or netstat (Darwin/macOS).
+    local pub=""
+    if [[ "$_fam" == darwin ]]; then
+        pub="$(netstat -an 2>/dev/null | awk '/LISTEN/{print $4}' \
+                | grep -Ev '^127\.|^\[::1\]|^::1\.' \
+                | grep -E '\.(22|25|80|443|3306|5432)$' | tr '\n' ' ' || true)"
+    else
+        pub="$(ss -H -tln 2>/dev/null | awk '{print $4}' \
+                | grep -Ev '^127\.|^\[::1\]' \
+                | grep -E ':(22|25|80|443|3306|5432)' | tr '\n' ' ' || true)"
+    fi
     [[ -n "$pub" ]] && { score=$((score+2)); reasons+=("public listeners: ${pub% }"); }
 
     # A running web server → server-leaning.
     local svc
-    for svc in nginx apache2 httpd caddy; do
-        systemctl is-active --quiet "$svc" 2>/dev/null \
-            && { score=$((score+2)); reasons+=("$svc running"); break; }
-    done
+    if [[ "$_fam" == darwin ]]; then
+        for svc in nginx httpd caddy; do
+            brew services list 2>/dev/null | awk -v s="$svc" '$1==s && $2=="started"{found=1} END{exit !found}' \
+                && { score=$((score+2)); reasons+=("$svc running"); break; }
+        done
+    else
+        for svc in nginx apache2 httpd caddy; do
+            systemctl is-active --quiet "$svc" 2>/dev/null \
+                && { score=$((score+2)); reasons+=("$svc running"); break; }
+        done
+    fi
 
-    # Laptop battery → workstation-leaning (strong).
-    compgen -G '/sys/class/power_supply/BAT*' >/dev/null 2>&1 \
-        && { score=$((score-2)); reasons+=("battery present (laptop)"); }
+    if [[ "$_fam" == darwin ]]; then
+        # Mac → workstation-leaning by default unless strong server signals present.
+        score=$((score-1)); reasons+=("macOS (workstation default)")
+        # Check for always-on server indicator: LaunchDaemons for web services.
+        ls /Library/LaunchDaemons/*nginx* /Library/LaunchDaemons/*httpd* 2>/dev/null | grep -q . \
+            && { score=$((score+2)); reasons+=("LaunchDaemon for web service"); }
+    else
+        # Laptop battery → workstation-leaning (strong).
+        compgen -G '/sys/class/power_supply/BAT*' >/dev/null 2>&1 \
+            && { score=$((score-2)); reasons+=("battery present (laptop)"); }
 
-    # Boots to a desktop → workstation-leaning.
-    [[ "$(systemctl get-default 2>/dev/null)" == graphical.target ]] \
-        && { score=$((score-1)); reasons+=("boots to graphical.target"); }
+        # Boots to a desktop → workstation-leaning.
+        [[ "$(systemctl get-default 2>/dev/null)" == graphical.target ]] \
+            && { score=$((score-1)); reasons+=("boots to graphical.target"); }
 
-    # Chassis hint from systemd.
-    case "$(hostnamectl chassis 2>/dev/null)" in
-        server)                        score=$((score+1)); reasons+=("chassis=server") ;;
-        laptop|desktop|tablet|handset) score=$((score-1)); reasons+=("chassis=laptop/desktop") ;;
-    esac
+        # Chassis hint from systemd.
+        case "$(hostnamectl chassis 2>/dev/null)" in
+            server)                        score=$((score+1)); reasons+=("chassis=server") ;;
+            laptop|desktop|tablet|handset) score=$((score-1)); reasons+=("chassis=laptop/desktop") ;;
+        esac
+    fi
 
     local guess=workstation
     (( score > 0 )) && guess=server
@@ -175,7 +197,7 @@ fi
 
 # --- 1. Detect family + profile --------------------------------------------
 FAMILY="$(watchman_family)"
-[[ "$FAMILY" == unknown ]] && die "Unsupported distro (need Debian/Ubuntu, RHEL family, or Arch)."
+[[ "$FAMILY" == unknown ]] && die "Unsupported platform (need Debian/Ubuntu, RHEL family, Arch, or macOS with Homebrew)."
 if [[ -z "$PROFILE" ]]; then
     IFS=$'\t' read -r GUESS GUESS_WHY < <(_profile_guess)
     if [[ "$ASSUME_YES" == yes || ! -t 0 ]]; then
@@ -232,11 +254,22 @@ if ! command -v cscli >/dev/null 2>&1; then
 fi
 
 # --- 3. Run-as user ---------------------------------------------------------
-# claude-watchman runs as root — no dedicated service user is created. root reads
-# every log and journal directly, so the loop needs no sudoers grant. The
-# config records this for transparency.
+# On Linux, claude-watchman runs as root to read all logs and journals directly.
+# On macOS, it runs as the current user with sudo for privileged log reads — the
+# Unified Log (log show) requires full disk access, typically granted via System Settings
+# > Privacy & Security > Full Disk Access for Terminal.app / your terminal emulator.
 WATCHMAN_USER=root
-if [[ $EUID -ne 0 ]]; then
+if [[ "$FAMILY" == darwin ]]; then
+    WATCHMAN_USER="$(id -un)"
+    if [[ $EUID -eq 0 ]]; then
+        warn "Running as root on macOS is unusual. Recommend running as your normal user."
+        warn "macOS Unified Log access requires Full Disk Access in System Settings > Privacy,"
+        warn "not root. Grant it to your terminal emulator and run as your normal user."
+    else
+        say "macOS mode: running as $WATCHMAN_USER. Ensure your terminal has Full Disk Access"
+        say "in System Settings > Privacy & Security for full log visibility."
+    fi
+elif [[ $EUID -ne 0 ]]; then
     warn "claude-watchman is designed to run as root; you are installing as a normal user."
     warn "Privileged setup steps below use sudo, and you should run 'claude' as root (see the"
     warn "tmux instructions at the end) so the loop can read all logs."

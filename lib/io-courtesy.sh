@@ -45,7 +45,9 @@ _io_role_mult() { case "$(_io_role)" in priority) echo 4 ;; peer) echo 2 ;; *) e
 # timeout. Missing tools are omitted; an empty wrapper runs the command directly.
 io_run() {
     local pre=()
-    if [[ "${WATCHMAN_IONICE:-yes}" == yes ]] && command -v ionice >/dev/null 2>&1; then
+    # ionice is Linux-only; skip gracefully on Darwin.
+    if [[ "${WATCHMAN_IONICE:-yes}" == yes ]] && command -v ionice >/dev/null 2>&1 \
+       && [[ "$(uname -s 2>/dev/null)" != Darwin ]]; then
         case "$(_io_role)" in
             priority) pre+=(ionice -c2 -n0) ;;   # best-effort, normal — do not deprioritize
             peer)     pre+=(ionice -c2 -n6) ;;   # best-effort, low
@@ -77,30 +79,51 @@ io_pressure_high() {
     mult="$(_io_role_mult)"
     thr="$(awk -v b="${WATCHMAN_IO_GUARD_PSI:-20}" -v m="$mult" 'BEGIN{printf "%.4f", b*m}')"
 
-    if [[ -r /proc/pressure/io ]]; then
-        psi="$(_io_psi_some_avg10 /proc/pressure/io)"
-        if [[ -n "$psi" ]]; then
-            awk -v p="$psi" -v t="$thr" 'BEGIN{exit !(p+0 > t+0)}' && return 0
-            # memory pressure (swapping) is also a reason to back off
-            mpsi="$(_io_psi_some_avg10 /proc/pressure/memory)"
-            [[ -n "$mpsi" ]] && awk -v p="$mpsi" -v t="$thr" 'BEGIN{exit !(p+0 > t+0)}' && return 0
-            return 1   # PSI present and below threshold → not under pressure
+    # Darwin has no /proc — skip PSI entirely and use the load/memory fallback.
+    if [[ "$(uname -s 2>/dev/null)" != Darwin ]]; then
+        if [[ -r /proc/pressure/io ]]; then
+            psi="$(_io_psi_some_avg10 /proc/pressure/io)"
+            if [[ -n "$psi" ]]; then
+                awk -v p="$psi" -v t="$thr" 'BEGIN{exit !(p+0 > t+0)}' && return 0
+                mpsi="$(_io_psi_some_avg10 /proc/pressure/memory)"
+                [[ -n "$mpsi" ]] && awk -v p="$mpsi" -v t="$thr" 'BEGIN{exit !(p+0 > t+0)}' && return 0
+                return 1   # PSI present and below threshold → not under pressure
+            fi
         fi
     fi
 
-    # Fallback (no PSI): per-core load — Linux loadavg includes I/O-wait tasks.
-    local load1 cpus per memav memtot mempct loadthr
-    load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null)"; cpus="$(io_cpus)"
+    # Fallback: per-core load average (Darwin: sysctl; Linux: /proc/loadavg).
+    local load1 cpus per loadthr
+    if [[ "$(uname -s 2>/dev/null)" == Darwin ]]; then
+        load1="$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')"
+    else
+        load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null)"
+    fi
+    cpus="$(io_cpus)"
     if [[ -n "$load1" ]]; then
         per="$(awk -v l="$load1" -v c="$cpus" 'BEGIN{printf "%.3f",(c>0?l/c:l)}')"
         loadthr="$(awk -v b="${WATCHMAN_IO_GUARD_LOAD:-1.5}" -v m="$mult" 'BEGIN{printf "%.3f", b*m}')"
         awk -v p="$per" -v t="$loadthr" 'BEGIN{exit !(p+0 > t+0)}' && return 0
     fi
-    memav="$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)"
-    memtot="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)"
-    if [[ -n "$memav" && -n "$memtot" && "$memtot" -gt 0 ]]; then
-        mempct=$(( memav * 100 / memtot ))
-        (( mempct < ${WATCHMAN_IO_GUARD_MEM_PCT:-10} )) && return 0
+
+    # Memory pressure (Darwin: vm_stat + hw.memsize; Linux: /proc/meminfo).
+    local memav memtot mempct
+    if [[ "$(uname -s 2>/dev/null)" == Darwin ]]; then
+        local pages_free page_size=4096
+        pages_free="$(vm_stat 2>/dev/null | awk '/^Pages free:/{gsub(/\./,"",$3); print $3}')"
+        memtot="$(sysctl -n hw.memsize 2>/dev/null)"
+        if [[ -n "$pages_free" && -n "$memtot" && "$memtot" -gt 0 ]]; then
+            memav=$(( pages_free * page_size ))
+            mempct=$(( memav * 100 / memtot ))
+            (( mempct < ${WATCHMAN_IO_GUARD_MEM_PCT:-10} )) && return 0
+        fi
+    else
+        memav="$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)"
+        memtot="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)"
+        if [[ -n "$memav" && -n "$memtot" && "$memtot" -gt 0 ]]; then
+            mempct=$(( memav * 100 / memtot ))
+            (( mempct < ${WATCHMAN_IO_GUARD_MEM_PCT:-10} )) && return 0
+        fi
     fi
     return 1
 }
@@ -110,14 +133,25 @@ io_should_defer_heavy() { io_pressure_high; }
 # io_pressure_reason — one-line human explanation (names the actual signal used).
 io_pressure_reason() {
     local mult psi role; role="$(_io_role)"; mult="$(_io_role_mult)"
-    psi="$(_io_psi_some_avg10 /proc/pressure/io 2>/dev/null)"
-    if [[ -n "$psi" ]]; then
-        echo "role=$role; I/O pressure (PSI some/avg10) ${psi}% (limit $(awk -v b="${WATCHMAN_IO_GUARD_PSI:-20}" -v m="$mult" 'BEGIN{printf "%g", b*m}')%)"
-        return
+    # Darwin has no /proc — always uses load-average fallback.
+    if [[ "$(uname -s 2>/dev/null)" != Darwin ]]; then
+        psi="$(_io_psi_some_avg10 /proc/pressure/io 2>/dev/null)"
+        if [[ -n "$psi" ]]; then
+            echo "role=$role; I/O pressure (PSI some/avg10) ${psi}% (limit $(awk -v b="${WATCHMAN_IO_GUARD_PSI:-20}" -v m="$mult" 'BEGIN{printf "%g", b*m}')%)"
+            return
+        fi
     fi
-    local load1 cpus per; load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null)"; cpus="$(io_cpus)"
+    local load1 cpus per
+    if [[ "$(uname -s 2>/dev/null)" == Darwin ]]; then
+        load1="$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')"
+    else
+        load1="$(awk '{print $1}' /proc/loadavg 2>/dev/null)"
+    fi
+    cpus="$(io_cpus)"
     per="$(awk -v l="${load1:-0}" -v c="$cpus" 'BEGIN{printf "%.2f",(c>0?l/c:l)}')"
-    echo "role=$role; load ${load1:-?}/${cpus} core = ${per}/core (limit $(awk -v b="${WATCHMAN_IO_GUARD_LOAD:-1.5}" -v m="$mult" 'BEGIN{printf "%.2f",b*m}')/core), no PSI on this kernel"
+    local note="no PSI on this kernel"
+    [[ "$(uname -s 2>/dev/null)" == Darwin ]] && note="no PSI on Darwin"
+    echo "role=$role; load ${load1:-?}/${cpus} core = ${per}/core (limit $(awk -v b="${WATCHMAN_IO_GUARD_LOAD:-1.5}" -v m="$mult" 'BEGIN{printf "%.2f",b*m}')/core), $note"
 }
 
 # io_measure <cmd...> — run politely (via io_run) AND record watchman's own cost.

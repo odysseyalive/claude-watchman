@@ -1,6 +1,6 @@
 ---
 name: check-log-retention
-description: "OBSERVE: are logs kept, persistent across boots, and rotated? The highest-value workstation check — volatile journald destroys the forensic trail crash diagnosis needs."
+description: "OBSERVE: are logs kept, persistent across boots, and rotated? Handles both Linux journald and macOS Unified Log."
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash
 ---
@@ -28,18 +28,42 @@ often need fixing — surface them clearly.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`.
-2. **journald persistence.** Read `Storage=` in `/etc/systemd/journald.conf` (and
-   drop-ins). Volatile or unset + no `/var/log/journal/` directory ⇒ logs do NOT
-   survive reboot. Journal `check_id=log_retention_volatile`, severity from
-   `profile_severity` (higher on workstation), `risk_tier=safe`,
-   remediation: set `Storage=persistent` and `mkdir /var/log/journal`.
-3. **journald size limits.** Read `SystemMaxUse=`; unbounded growth is
-   `check_id=journal_size_unbounded`, `risk_tier=safe`.
-4. **logrotate.** Is logrotate installed and is `/etc/logrotate.conf` +
-   `/etc/logrotate.d/` present and non-empty? Missing rotation for active log files
-   ⇒ `check_id=log_rotation_missing`, `risk_tier=safe`.
-5. **Journal each** with a clear plain-language `detail` of what is lost if
+1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`;
+   resolve `family="$(watchman_family)"`.
+
+2. **Platform branch.**
+
+   **Linux (family != darwin):**
+   - **journald persistence.** Read `Storage=` in `/etc/systemd/journald.conf` (and
+     drop-ins). Volatile or unset + no `/var/log/journal/` directory ⇒ logs do NOT
+     survive reboot. Journal `check_id=log_retention_volatile`, severity from
+     `profile_severity` (higher on workstation), `risk_tier=safe`,
+     remediation: set `Storage=persistent` and `mkdir /var/log/journal`.
+   - **journald size limits.** Read `SystemMaxUse=`; unbounded growth is
+     `check_id=journal_size_unbounded`, `risk_tier=safe`.
+   - **logrotate.** Is logrotate installed and is `/etc/logrotate.conf` +
+     `/etc/logrotate.d/` present and non-empty? Missing rotation for active log files
+     ⇒ `check_id=log_rotation_missing`, `risk_tier=safe`.
+
+   **macOS (family == darwin):**
+   - **Unified Log persistence.** macOS Unified Log is persistent by default (stored
+     in `/var/db/diagnostics`). Check that the directory exists and is non-empty:
+     `ls /var/db/diagnostics/ 2>/dev/null | grep -q .` — if missing or empty, journal
+     `check_id=log_retention_volatile`, `risk_tier=safe`, remediation: check that
+     Full Disk Access is granted to the terminal in System Settings > Privacy & Security.
+   - **Log store size.** `du -sh /var/db/diagnostics 2>/dev/null` — record as
+     `check_id=journal_size_unbounded` info finding with detail showing the size. No
+     automatic max on macOS; note this for the operator.
+   - **ASL / system log retention.** Check `/etc/asl.conf` and `/etc/asl/` for
+     retention configuration. Missing ASL config is `check_id=log_rotation_missing`,
+     `risk_tier=safe`, detail: "ASL config absent — log rotation for legacy syslog
+     entries may be unconfigured".
+   - **Note:** `log show` access requires Full Disk Access. If `log show --last 1m`
+     returns a permission error, journal `check_id=log_retention_volatile`,
+     `severity=medium`, `risk_tier=manual`, detail: "macOS Unified Log not readable —
+     grant Full Disk Access to your terminal in System Settings > Privacy & Security".
+
+3. **Journal each** with a clear plain-language `detail` of what is lost if
    unaddressed. Never edit these configs here — that is `fix-redflag` (all `safe`-tier).
 <!-- /origin -->
 

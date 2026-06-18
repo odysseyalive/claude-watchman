@@ -32,7 +32,8 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 ## Workflow
 
 1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
-   `journal_init`; `dir="$(profile_log_direction)"` → `inbound` or `outbound`. **I/O
+   `journal_init`; `dir="$(profile_log_direction)"` → `inbound` or `outbound`;
+   `family="$(watchman_family)"`. **I/O
    courtesy:** scanning large/rotated logs is heavy — IF `io_should_defer_heavy`, journal
    one `capacity`/`info`/`safe` `diagnostic_deferred` (`target=inspect-logs`,
    detail `"deferred: $(io_pressure_reason)"`) and skip the log-scan/rate steps this pass;
@@ -46,11 +47,18 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    install it, then fall back:
    - inbound: scan EVERY directory returned by `$(webserver_log_paths)` — this is
      config-derived (parsed from each present server's config), so it covers custom
-     `access_log`/`CustomLog` targets, per-vhost logs, and niche servers, NOT just
-     `/var/log/{nginx,apache2,httpd}` — plus `$(log_path_auth)` (or journald via
-     `journalctl -u sshd`) for repeated 4xx/401/auth-failure bursts;
-   - outbound: `ss -tunp` current connections; compare remote addresses against
-     `journal/network-baseline.txt` from `baseline-network`.
+     `access_log`/`CustomLog` targets, per-vhost logs, and niche servers — plus auth
+     log access:
+     - **Linux:** `$(log_path_auth)` (file path) or `journalctl -u sshd` if sentinel
+       is `journald:*` — scan for repeated 4xx/401/auth-failure bursts.
+     - **macOS (family == darwin):** `log_path_auth` returns `darwin:log:process==sshd`;
+       use `log show --predicate 'process == "sshd"' --last 24h 2>/dev/null` to extract
+       auth failures. Note: requires Full Disk Access in System Settings > Privacy & Security.
+   - outbound:
+     - **Linux:** `ss -tunp` current connections; compare remote addresses against
+       `journal/network-baseline.txt` from `baseline-network`.
+     - **macOS:** `lsof -i -n -P 2>/dev/null | awk '/ESTABLISHED/{print $9}'` for
+       current outbound connections; compare against `journal/network-baseline.txt`.
 4. **Request-rate spikes (DDoS / abuse) — server profile.** If
    `profile_runs_check request_rate_spike`: `source lib/webstats.sh` and run
    `webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the
@@ -65,15 +73,14 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    `risk_tier=review`, `check_id=request_rate_spike`, `target=<ip>` (per-IP, so the
    fingerprint is stable and a returning flooder regresses loudly); detail = the
    peak/min, total, and UA sample; remediation = `firewall_deny <ip>/32` — shown and
-   confirmed per the risk tiers. Bots/crawlers may appear here; the operator decides
-   (it is `review`, never auto-applied). CrowdSec, when present, is the real-time
-   enforcement layer; this is the log-cadence detector that proposes the rule.
+   confirmed per the risk tiers. Note: on macOS `firewall_deny` uses pf and will
+   explain the anchor-file approach rather than applying directly. Bots/crawlers may
+   appear here; the operator decides (it is `review`, never auto-applied).
 5. **Journal findings.** Inbound probe clusters → `category=security`; new outbound
    destinations → `category=security`, severity per `profile_severity outbound_new_connections`.
    `check_id` stable per pattern/destination so re-runs update in place.
 6. **Never block or ban.** Enforcement (firewall/ban) is the operator-run fixer's
-   job under the risk tiers — this skill only observes and records. The rate-spike
-   finding PROPOSES the exact `firewall_deny` rule; it never applies it.
+   job under the risk tiers — this skill only observes and records.
 <!-- /origin -->
 
 ## Grounding
