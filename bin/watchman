@@ -7,6 +7,7 @@
 #   watchman preflight   Regenerate the Claude permission profiles + in-session commands.
 #   watchman update      Re-fetch the latest product (manifest, NO git) + regenerate locals.
 #                        Same as re-running the installer. 'update --check' = maintainer guard.
+#   watchman testmail    Send one test email to prove the .env SMTP creds + msmtp deliver.
 #   watchman uninstall   Remove claude-watchman — unlink the CLI + delete install's artifacts
 #                        in tiers, each confirmed (default No). Never removes packages.
 #   watchman safe        LAUNCH a read-only session under the DEFAULT profile (same as `claude` here).
@@ -56,6 +57,10 @@ watchman — claude-watchman shell CLI. Zero-token, bash-only verbs:
                        locals. Same command as installing; never touches your local state.
                        Maintainer subflags: '--check' = release-readiness guard;
                        '--sync' = regenerate manifest.txt from the tracked product.
+  watchman testmail    Send one fixed test email to verify mail delivery end to end:
+                       the .env SMTP credentials authenticate and msmtp delivers to
+                       REPORT_EMAIL. Loud on failure (unconfigured / msmtp missing).
+                       Read-only — sends an email, changes nothing on the system.
   watchman uninstall   Remove claude-watchman in tiers, each behind its own confirmation
                        (default No): unlink the CLI, drop the generated artifacts, then
                        (only if you confirm) your data/secrets and the product files. Never
@@ -209,6 +214,16 @@ case "$verb" in
             --sync)  update_sync_run ;;
             *)       update_run ;;
         esac
+        ;;
+
+    testmail)
+        # Pure bash — NO claude, no tokens. Send one fixed test message to prove the
+        # .env SMTP credentials and the msmtp transport actually deliver. Loud by
+        # design: unconfigured/missing-msmtp is a failure here, not a silent skip.
+        # Read-only — sends an email, writes nothing to the system or the journal.
+        # shellcheck source=lib/smtp.sh
+        source "$WATCHMAN_ROOT/lib/smtp.sh"
+        smtp_send_test
         ;;
 
     uninstall)

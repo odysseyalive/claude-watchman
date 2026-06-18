@@ -94,3 +94,45 @@ EOF
     fi
     echo "smtp: report sent to $REPORT_EMAIL" >&2
 }
+
+# smtp_send_test — send a fixed test message to prove the .env credentials and the
+# msmtp transport actually deliver, end to end. This is the plumbing-verification
+# path behind `watchman testmail`, so it does NOT degrade silently the way
+# send_report does for the loop: an operator running a test wants a loud, explicit
+# result. Unconfigured or msmtp-missing is a FAILURE here (returns non-zero with a
+# pointer to the fix), not a quiet skip.
+#
+# Read-only: it sends one email and writes nothing to the system or the journal.
+smtp_send_test() {
+    if ! smtp_is_configured; then
+        cat >&2 <<EOF
+smtp: mail is NOT configured — cannot send a test.
+      Fill in $SMTP_ENV_FILE: SMTP_HOST, SMTP_USER, SMTP_PASS, REPORT_EMAIL.
+      (Copy .env.example to .env if you have not yet.)
+EOF
+        return 1
+    fi
+    if ! command -v msmtp >/dev/null 2>&1; then
+        echo "smtp: msmtp is not installed — cannot send a test. Install it (pkg_install msmtp)." >&2
+        return 1
+    fi
+
+    local host="${HOSTNAME:-$(hostname 2>/dev/null || echo unknown)}"
+    echo "smtp: sending test to ${REPORT_EMAIL} via ${SMTP_HOST}:${SMTP_PORT:-587} ..." >&2
+
+    local body
+    body="claude-watchman test email from ${host}.
+
+If you are reading this, SMTP delivery works: .env credentials authenticated
+to ${SMTP_HOST} and msmtp delivered to ${REPORT_EMAIL}. No findings are attached —
+this is only a transport check.
+
+Reports will arrive here when the loop's delta crosses a notify threshold."
+
+    if printf '%s\n' "$body" | send_report "claude-watchman: test email from ${host}"; then
+        echo "smtp: test sent — check the ${REPORT_EMAIL} inbox (and spam folder)." >&2
+        return 0
+    fi
+    echo "smtp: test FAILED to send (see the msmtp error above)." >&2
+    return 1
+}
