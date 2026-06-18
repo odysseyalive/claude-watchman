@@ -54,10 +54,12 @@ EOF
 _journal_write() {
     local sql="$1"
     exec 9>"$_JOURNAL_LOCK"
-    flock 9
+    # flock is Linux-only; on Darwin fall back to unlocked write (SQLite WAL
+    # provides sufficient concurrency safety for the single-writer use case).
+    command -v flock >/dev/null 2>&1 && flock 9
     _journal_sqlite "$sql"
     local rc=$?
-    flock -u 9
+    command -v flock >/dev/null 2>&1 && flock -u 9
     exec 9>&-
     return $rc
 }

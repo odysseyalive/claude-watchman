@@ -142,7 +142,7 @@ _pf_resolve_read() {
 # additionalDirectories, and sudoers command paths.
 preflight_collate() {
     local -a allow=() adddirs=() sudoers=()
-    mapfile -t allow < <(_pf_framework_allow)
+    while IFS= read -r _pf_line; do allow+=("$_pf_line"); done < <(_pf_framework_allow)
 
     local m
     while IFS= read -r m; do

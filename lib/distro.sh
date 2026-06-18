@@ -371,7 +371,7 @@ webserver_config_roots() {
 # grants Read on each; inspect-logs scans each. Safety net: any well-known dir
 # that exists is unioned in, and a last-resort default guarantees ≥1 line.
 webserver_log_paths() {
-    local -A seen=()
+    local seen_list=""   # colon-delimited dedup list; bash 3.2-safe (no assoc arrays)
     local results=()
     local WLP_RELBASE=""
 
@@ -397,12 +397,12 @@ webserver_log_paths() {
             p="$WLP_RELBASE/$p"
         fi
         d="$(dirname "$p")"
-        [[ -n "${seen[$d]:-}" ]] || { seen[$d]=1; results+=("$d"); }
+        case ":${seen_list}:" in *":${d}:"*) : ;; *) seen_list="${seen_list:+$seen_list:}$d"; results+=("$d") ;; esac
         return 0
     }
     _wlp_add_dir() {  # record a directory directly (no dirname)
         local d="${1:-}"
-        [[ -n "$d" && -z "${seen[$d]:-}" ]] && { seen[$d]=1; results+=("$d"); }
+        [[ -n "$d" ]] || return 0; case ":${seen_list}:" in *":${d}:"*) : ;; *) seen_list="${seen_list:+$seen_list:}$d"; results+=("$d") ;; esac
         return 0
     }
 
