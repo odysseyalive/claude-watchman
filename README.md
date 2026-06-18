@@ -109,8 +109,10 @@ That's the whole loop: launch a session once with `watchman safe`, then drive it
 `/watchman …` commands. (`watchman audit` and `watchman report` at your shell also work —
 they just open a session already running that slash-command for you.)
 
-**4. Turn on recurring monitoring.** Keep the loop in a tmux session so it persists but
-stays visible. Start a persistent session:
+**4. Turn on recurring monitoring.** There are two ways to run watchman on a cadence,
+covered in full under [Recurring monitoring](#recurring-monitoring) below. The quick start
+is the **visible** one: keep the loop in a tmux session so it persists but stays visible,
+with a live token meter. Start a persistent session:
 
 ```bash
 tmux new -s watchman
@@ -128,14 +130,17 @@ emails you only when something crosses a threshold. Re-attach with
 `tmux attach -t watchman` whenever you want to see what it's doing.
 
 The loop lives **inside** the Claude Code session — `/loop` is just Claude re-running the
-pass on the interval, not a daemon or a cron job (claude-watchman ships no scheduler of its
-own). That distinction decides what survives:
+pass on the interval, not a daemon or a cron job. That distinction decides what survives:
 
 - **Detaching from tmux** (`Ctrl-b d`) leaves Claude running, so the loop keeps going even
   after you log out or close the terminal. This is the normal way to leave it.
 - **Closing Claude** — exiting the session, the process dying, or rebooting the box — ends
   the loop. Nothing restarts it automatically; you would re-launch the tmux session and run
   `/loop` again. (tmux itself does not survive a reboot.)
+- **A `/loop` expires after about 7 days.** Even left attached, the recurring pass stops
+  after roughly a week, so this method needs re-launching about weekly. If you need a host
+  watched indefinitely without that, use the headless schedule under
+  [Recurring monitoring](#recurring-monitoring).
 
 There is currently no in-session command to clear a running `/loop` — pressing `Esc` stops
 the iteration in flight but the next one still fires on schedule. The reliable way to stop
@@ -216,6 +221,8 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `watchman report` | **Launcher**: opens a read-only session (default profile) already running `/watchman report`. |
 | `watchman fix` | **Launcher** (spends nothing itself): opens a Claude session in the FIX profile and **auto-runs the fixer for you** — you don't type anything, you just confirm each change. |
 | `watchman dev` | **Launcher** for maintainers: opens a session in the DEV profile (repo-write, `acceptEdits`) for editing the source. |
+| `watchman schedule` | Install / remove / inspect the headless monitoring trigger (systemd timer or cron) for indefinite, unattended monitoring. `install [--every 6h] [--cron\|--systemd]`, `remove`, `status`. Install/remove are operator-confirmed system changes. |
+| `watchman run` | The one token-spending shell verb: run ONE headless loop pass (what the schedule fires). Read-only like the loop; logs its token cost to the ledger. Normally fired by the schedule, not by hand. |
 
 **In a Claude Code session**, AI features, visible token use (typed at the `claude` prompt, with the slash):
 
@@ -253,9 +260,15 @@ watchman safe
 Then, inside the session, run `/watchman audit` and `/watchman report`. (Or skip straight
 to one with `watchman audit` / `watchman report`, which open a session already running it.)
 
-**Recurring monitoring.** Keep the loop in a tmux session; it persists across logout but
-stays attachable, so you always see what it's doing and what it spends. Start a persistent
-session:
+### Recurring monitoring
+
+There are two ways to run watchman on a cadence. Both run the same read-only pass and can
+apply no fixes; they differ in what fires the pass and how you see the token cost.
+
+**Method 1 — the visible tmux loop (recommended default).** Claude Code's built-in `/loop`
+re-runs the pass on an interval inside a tmux session, so it persists across logout but
+stays attachable — you always see what it's doing and what it spends on a live meter. Start
+a persistent session:
 
 ```bash
 tmux new -s watchman
@@ -267,7 +280,43 @@ Inside it, launch Claude as root (`claude`, run `/login` once), then start the l
 /loop 6h /watchman loop
 ```
 
-Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
+Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`. The
+one catch: **a `/loop` expires after about 7 days**, so you re-launch it roughly weekly.
+
+**Method 2 — the headless schedule (for indefinite, unattended monitoring).** When a host
+must be watched without anyone re-launching a `/loop`, install an OS trigger that fires one
+headless pass on an interval and outlives any session. It uses a systemd timer where systemd
+is present, else cron. Install it (default interval 6h; it asks you to confirm the system
+change first):
+
+```bash
+watchman schedule install --every 6h
+```
+
+Check the trigger and what the headless passes have spent:
+
+```bash
+watchman schedule status
+```
+
+Remove it when you're done (also confirmed):
+
+```bash
+watchman schedule remove
+```
+
+Because a scheduled trigger has no session to show a live token meter, each headless pass
+records its tokens and cost to `journal/run-ledger.tsv` — `watchman schedule status` prints
+that ledger, and the email report folds in the running total, so token use stays visible
+after the fact. The trigger calls `watchman run`, the headless single-pass verb; you can run
+it by hand once to test it:
+
+```bash
+watchman run
+```
+
+For this to work headlessly, root must have logged into Claude once (`claude`, then
+`/login`) so `watchman run` can authenticate with no prompt.
 
 **Fixing what it finds.** Don't run `/watchman fix` in the loop or a plain session; it
 can't apply anything there (that's the seatbelt). Instead, from your shell run:

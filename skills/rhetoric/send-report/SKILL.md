@@ -35,7 +35,12 @@ a plain `/watchman report` (that just prints).
    `WATCHMAN_NOTIFY_ON_REGRESSION=yes`, OR (workstation) a new outbound destination and
    `WATCHMAN_NOTIFY_ON_NEW_OUTBOUND=yes`. Otherwise **send nothing** and exit quietly.
 3. **Build the body** from `report-status` output. Subject should name the machine and
-   lead with the headline (e.g. "watchman: 1 REGRESSED, 2 new high on <host>").
+   lead with the headline (e.g. "watchman: 1 REGRESSED, 2 new high on <host>"). When the
+   loop is driven by the **headless schedule** (cron/systemd via `watchman run`) there is
+   no live token meter, so append the run-cost ledger to the body — run `bash lib/wm
+   schedule_ledger_summary` and add its output under a "Headless run cost" footer so the
+   operator still sees what the scheduled passes have spent. (It self-describes as "none
+   yet" when only the visible tmux `/loop` is in use, so it is always safe to include.)
 4. **Dispatch** via `bash lib/wm send_report "<subject>" <body_file>` in `lib/smtp.sh`. Never read
    `.env` or SMTP creds directly — `smtp.sh` is the only gate.
 5. **Degrade gracefully.** If mail is unconfigured (`.env` missing / `SMTP_PASS` blank)
@@ -47,5 +52,6 @@ a plain `/watchman report` (that just prints).
 
 - `lib/smtp.sh` — `send_report`, `smtp_is_configured` (the only reader of `.env`; reached via `bash lib/wm <function>`).
 - `lib/journal.sh` — run summary and counts (reached via `bash lib/wm <function>`).
+- `lib/schedule.sh` — `schedule_ledger_summary` (read-only token/cost of headless `watchman run` passes; reached via `bash lib/wm schedule_ledger_summary`).
 - `config/watchman.conf` — notify thresholds.
 - `report-status` — supplies the email body.

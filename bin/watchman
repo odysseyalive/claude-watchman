@@ -15,10 +15,19 @@
 #   watchman report      LAUNCH a read-only session under the DEFAULT profile, running /watchman report.
 #   watchman fix         LAUNCH a remediation session in the FIX profile (default mode).
 #   watchman dev         LAUNCH a maintainer session in the DEV profile (acceptEdits).
+#   watchman run         Run ONE headless loop pass (for cron/systemd) + log its token cost.
+#   watchman schedule    Install/remove/inspect the recurring headless trigger (cron|systemd).
 #
 # loop and inventory are NOT shell verbs. They run inside a Claude Code session as
 # `/watchman <verb>`, where you see the work and the token meter. Typing one of those
 # here prints how to run it.
+#
+# There are TWO recurring cadences (see the bottom of usage and the README):
+#   1. VISIBLE: '/loop 6h /watchman loop' in a tmux session — a live token meter, but
+#      the /loop expires after ~7 days.
+#   2. PERSISTENT/HEADLESS: 'watchman schedule install' fires 'watchman run' on a cron
+#      or systemd interval that outlives any session. No live meter — token cost is
+#      logged per run to journal/run-ledger.tsv and folded into the email report.
 #
 # safe/audit/report/fix/dev ARE shell verbs, but only as LAUNCHERS: a session's permission
 # mode and profile are fixed at startup and Claude Code never hot-reloads them, so a verb
@@ -95,12 +104,23 @@ The remaining AI features run INSIDE a Claude Code session (run `watchman safe` 
 in-session, not as headless shell forks, is deliberate: Claude Code spends tokens on
 every pass, and you should see that happening.
 
-Recurring monitoring — claude-watchman ships NO scheduler. Keep the loop in a tmux
-session (as root) so it persists AND stays visible — re-attach any time:
-    tmux new -s watchman      # persistent session
-    claude                    # launch Claude Code as root (/login once)
-    /loop 6h /watchman loop  # start the recurring pass
-    # Ctrl-b d to detach; 'tmux attach -t watchman' to re-attach
+Recurring monitoring — TWO cadences, pick one:
+
+  1. VISIBLE (default) — Claude Code's built-in /loop in a tmux session, so it persists
+     across logout AND stays re-attachable with a live token meter. The catch: a /loop
+     expires after ~7 days, so you re-launch it about weekly.
+         tmux new -s watchman      (persistent session)
+         claude                    (launch Claude Code as root; /login once)
+         /loop 6h /watchman loop   (start the recurring pass; Ctrl-b d to detach)
+
+  2. PERSISTENT/HEADLESS — for a host that must be watched indefinitely without
+     re-launching. A systemd timer (or cron) fires 'watchman run' on an interval; it
+     outlives any session. There is no live meter, so each pass logs its token cost to
+     journal/run-ledger.tsv and the email report shows the running total.
+         watchman schedule install --every 6h     (operator-confirmed; reversible)
+         watchman schedule status                 (trigger + token/cost ledger)
+         watchman schedule remove                 (tear it back down)
+     Headless runs are read-only, exactly like the loop: they can apply no fixes.
 EOF
     exit "${1:-0}"
 }
@@ -233,6 +253,51 @@ case "$verb" in
         # shellcheck source=lib/uninstall.sh
         source "$WATCHMAN_ROOT/lib/uninstall.sh"
         uninstall_run "$@"
+        ;;
+
+    run)
+        # The OPTIONAL headless cadence (cron / systemd timer call this). Runs ONE
+        # /watchman loop pass with no interactive session, under the same read-only
+        # dontAsk loop profile as the tmux loop (so it applies NOTHING), and records
+        # the pass's tokens + cost to the ledger so token use stays visible without a
+        # live meter. This is the ONE token-spending shell verb — deliberately, because
+        # cron/systemd have no session to run a slash command in. For INTERACTIVE use,
+        # prefer the visible tmux '/loop 6h /watchman loop'.
+        # shellcheck source=lib/schedule.sh
+        source "$WATCHMAN_ROOT/lib/schedule.sh"
+        schedule_run "$@"
+        ;;
+
+    schedule)
+        # Install / remove / inspect the recurring trigger that fires 'watchman run'
+        # (systemd timer where available, else cron). Pure bash; install/remove are
+        # operator-confirmed system changes (Prime Directive stop-warn-ask).
+        # shellcheck source=lib/schedule.sh
+        source "$WATCHMAN_ROOT/lib/schedule.sh"
+        sub="${1:-}"; shift || true
+        case "$sub" in
+            install) schedule_install "$@" ;;
+            remove)  schedule_remove "$@" ;;
+            status)  schedule_status "$@" ;;
+            ""|-h|--help|help)
+                cat >&2 <<'EOF'
+watchman schedule — manage the OPTIONAL headless monitoring cadence (a persistent
+alternative to the tmux /loop, which expires after ~7 days). Subcommands:
+
+  watchman schedule install [--every <N>m|<N>h|<N>d] [--cron|--systemd]
+        Install a recurring trigger that runs 'watchman run' (one headless loop
+        pass) on the interval. Default interval 6h; default mechanism is a systemd
+        timer where systemd is present, else cron. Each install is an
+        operator-confirmed system change; reversible with 'remove'.
+  watchman schedule remove
+        Stop and remove the claude-watchman trigger (timer units and/or the cron
+        line). Confirmed; touches no other service or crontab entry.
+  watchman schedule status
+        Show the installed trigger and the headless-run token/cost ledger.
+EOF
+                exit 0 ;;
+            *) echo "watchman schedule: unknown subcommand '$sub' (install|remove|status)." >&2; exit 2 ;;
+        esac
         ;;
 
     loop|inventory) _redirect_to_session "$verb" ;;

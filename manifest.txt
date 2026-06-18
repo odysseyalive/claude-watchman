@@ -27,6 +27,7 @@ lib/io-courtesy.sh
 lib/journal.sh
 lib/preflight.sh
 lib/profile.sh
+lib/schedule.sh
 lib/sectools.sh
 lib/security_currency.sh
 lib/selfcheck.sh

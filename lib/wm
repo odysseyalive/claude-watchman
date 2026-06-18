@@ -44,8 +44,11 @@ cd "$WATCHMAN_ROOT"
 
 # System-mutating functions: refused unless WM_APPLY=1 (see the seatbelt note above).
 # Journal writes (journal_upsert/journal_set_status/…) are the sanctioned create-or-update
-# and are deliberately NOT listed.
-_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install "
+# and are deliberately NOT listed. The schedule_* mutators (install/remove change the
+# crontab or systemd units; run forks a headless claude) are guarded too, so the loop can
+# never invoke the scheduler through the dispatcher — they are CLI-only (bin/watchman).
+# The read-only schedule_ledger_summary is NOT listed: send-report folds it into the email.
+_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install schedule_run schedule_install schedule_remove "
 
 # Source the observe/analyze/report libs in dependency order: core first (the engines below
 # assume distro.sh/profile.sh are already loaded), then the engines, then the report path.
@@ -53,7 +56,7 @@ _WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_i
 # shellcheck source=/dev/null
 for _lib in journal.sh distro.sh profile.sh io-courtesy.sh \
             capacity.sh webstats.sh security_currency.sh cpanel.sh sectools.sh shellhist.sh \
-            smtp.sh; do
+            smtp.sh schedule.sh; do
     [[ -r "lib/$_lib" ]] && source "lib/$_lib"
 done
 

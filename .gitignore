@@ -11,6 +11,8 @@ journal/findings.db-wal
 journal/findings.db-shm
 journal/network-baseline.txt
 journal/log-offsets.txt
+journal/run-ledger.tsv
+journal/run.log
 journal/.write.lock
 
 # preflight staging + scratch
