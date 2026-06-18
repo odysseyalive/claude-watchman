@@ -263,11 +263,11 @@ needs. `/watchman stats` reads it and prints:
   skew the numbers), **top pages by unique visitor**, **referrers**, **status-code mix**,
   **bots-vs-humans**, and a **daily trend**.
 
-The privacy posture is the feature: the client IP is used **only in memory** to correlate
-a visitor's requests, then discarded — it is never stored, never hashed-and-kept, never
-shown. The report is pure anonymous aggregates, computed on your own box, with **no
-cookies, no JavaScript, no third party, and nothing leaving the host**. It reads current
-and rotated logs (including `.gz`), and breaks down per site when you serve several.
+Privacy is the point — the client IP is used **only in memory** to correlate a visitor's
+requests, then discarded; it is never stored, never hashed-and-kept, never shown. The
+report is pure anonymous aggregates, computed entirely on your own box — nothing
+client-side to install, and **nothing leaves the host**. It reads current and rotated logs
+(including `.gz`), and breaks down per site when you serve several.
 
 Run it on demand — it is deliberately **not** part of the monitoring loop:
 
