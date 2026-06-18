@@ -123,7 +123,7 @@ selfcheck_run() {
     local cdir="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
     if [[ -f "$cdir/settings.json" ]]; then
         local mode; mode="$(jq -r '.permissions.defaultMode // "unset"' "$cdir/settings.json" 2>/dev/null)"
-        [[ "$mode" == dontAsk ]] && _ok "settings.json defaultMode=dontAsk" || _warn "settings.json defaultMode=$mode (expected dontAsk for the loop)"
+        [[ "$mode" == dontAsk ]] && _ok "settings.json defaultMode=dontAsk" || _warn "settings.json defaultMode=$mode — the loop needs dontAsk; run 'watchman preflight' to repair it (use 'watchman dev' for edit sessions)"
     else _warn "settings.json absent — run install.sh / watchman preflight"; fi
     if [[ -f "$cdir/settings.local.json" ]]; then
         local na; na="$(jq -r '.permissions.allow | length' "$cdir/settings.local.json" 2>/dev/null)"

@@ -319,7 +319,29 @@ preflight_write_base_settings() {
     local claude_dir="$1" target="$1/settings.json"
     mkdir -p "$claude_dir"
     if [[ -e "$target" ]]; then
-        echo "preflight: base settings.json exists — leaving it untouched." >&2
+        # The base IS the loop/audit profile, and the unattended loop REQUIRES
+        # defaultMode=dontAsk: anything unallowed auto-denies and fails loudly, with
+        # no TTY prompt to hang on. That mode is a safety CONTRACT, not operator
+        # tuning — yet an interactive Shift-Tab mode-cycle (or a stray session) can
+        # silently persist a different defaultMode into this file and quietly break
+        # the loop. So we NEVER clobber the operator's deny list or other keys, but
+        # we DO repair a drifted defaultMode back to dontAsk. Maintainers who want
+        # acceptEdits use `watchman dev` (its own profile via --permission-mode),
+        # never the base. fix/dev pass --permission-mode explicitly, so repairing the
+        # base never affects them.
+        local cur; cur="$(jq -r '.permissions.defaultMode // "unset"' "$target" 2>/dev/null)"
+        if [[ "$cur" == dontAsk ]]; then
+            echo "preflight: base settings.json present (defaultMode=dontAsk) — operator tuning kept." >&2
+        else
+            local tmp; tmp="$(mktemp "${target}.XXXXXX" 2>/dev/null)" || tmp="${target}.tmp"
+            if jq '.permissions.defaultMode = "dontAsk"' "$target" > "$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+                mv "$tmp" "$target"
+                echo "preflight: repaired base settings.json defaultMode ($cur -> dontAsk) — the loop requires it (use 'watchman dev' for an edit session)." >&2
+            else
+                rm -f "$tmp"
+                echo "preflight: WARNING base settings.json defaultMode=$cur (loop needs dontAsk) and auto-repair failed — fix it by hand." >&2
+            fi
+        fi
         return 0
     fi
     local deny; deny="$(_pf_deny_base)"
