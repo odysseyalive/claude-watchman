@@ -20,6 +20,7 @@ config/watchman.conf.example
 .env.example
 install.sh
 journal/schema.sql
+lib/cpanel.sh
 lib/distro.sh
 lib/io-courtesy.sh
 lib/journal.sh
@@ -42,6 +43,8 @@ skills/grammar/check-security-currency/manifest.json
 skills/grammar/check-security-currency/SKILL.md
 skills/grammar/check-shell-history/manifest.json
 skills/grammar/check-shell-history/SKILL.md
+skills/grammar/inspect-cpanel/manifest.json
+skills/grammar/inspect-cpanel/SKILL.md
 skills/grammar/inspect-logs/manifest.json
 skills/grammar/inspect-logs/SKILL.md
 skills/grammar/inspect-web-config/manifest.json

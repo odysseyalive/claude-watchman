@@ -61,6 +61,15 @@ security_currency:medium:medium
 diagnostic_deferred:info:info
 self_footprint:info:info
 service_inventory:info:info
+cpanel_cphulk_disabled:high:-
+cpanel_eol_php:medium:-
+cpanel_autoupdate_off:medium:-
+cpanel_update_tier:low:-
+cpanel_mail_queue_spike:high:-
+cpanel_mail_frozen:medium:-
+cpanel_csf_orphaned:medium:-
+cpanel_imunify_malware:high:-
+cpanel_rpm_altered:high:-
 '
 
 # Echo the applicable check_ids for the profile.

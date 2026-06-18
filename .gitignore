@@ -18,6 +18,8 @@ journal/.write.lock
 .pf.allow
 .pf.dirs
 .pf.sudoers
+.pf.fix.allow
+.pf.fix.dirs
 journal/findings.db.backup-*
 
 # editor / OS cruft

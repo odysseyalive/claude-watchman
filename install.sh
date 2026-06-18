@@ -272,6 +272,8 @@ else
     cat >> "$GI" <<'EOF'
 
 # claude-watchman — never commit these
+# (install.sh (re)generates this block; the canonical copy lives in CLAUDE.md.
+#  Order matters: the .env.example negation must follow the .env* glob.)
 CLAUDE.md
 .claude/
 .env*
@@ -283,6 +285,20 @@ journal/findings.db-shm
 journal/network-baseline.txt
 journal/log-offsets.txt
 journal/.write.lock
+
+# preflight staging + scratch
+.watchman-sudoers.staged
+.pf.allow
+.pf.dirs
+.pf.sudoers
+.pf.fix.allow
+.pf.fix.dirs
+journal/findings.db.backup-*
+
+# editor / OS cruft
+*.swp
+*~
+.DS_Store
 EOF
 fi
 

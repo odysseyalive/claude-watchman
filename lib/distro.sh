@@ -453,3 +453,34 @@ integrity_verify_all() {
         *) echo "integrity: no verifier available" >&2; return 2 ;;
     esac
 }
+
+# --- Control panel (cPanel/WHM) --------------------------------------------
+# cPanel is orthogonal to the distro family (it rides on RHEL/Ubuntu), so it is a
+# separate attribute, not a fourth family. Detection is unambiguous: the cpanel
+# binary at a fixed path. control_panel_detect echoes "cpanel" or "" so a skill/
+# profile can branch, and the preflight (which sources this file) can resolve the
+# cpanel_log_paths read token to grant Read on the real cPanel log dirs.
+control_panel_detect() {   # echoes: cpanel | (empty)
+    if [[ -n "${WATCHMAN_CONTROL_PANEL:-}" ]]; then printf '%s\n' "$WATCHMAN_CONTROL_PANEL"; return; fi
+    local cp=""
+    [[ -x /usr/local/cpanel/cpanel ]] && cp="cpanel"
+    WATCHMAN_CONTROL_PANEL="$cp"
+    printf '%s\n' "$cp"
+}
+
+# The authoritative cPanel version string (empty if not a cPanel box).
+cpanel_version() {
+    [[ -r /usr/local/cpanel/version ]] && tr -d '[:space:]' < /usr/local/cpanel/version 2>/dev/null
+}
+
+# The DIRECTORIES holding cPanel/WHM logs on this host (only those that exist).
+# Granted Read by the preflight (resolver token, like webserver_log_paths) so
+# inspect-cpanel can read cpsrvd/cphulkd/Exim/per-domain logs wherever they live.
+cpanel_log_paths() {
+    [[ "$(control_panel_detect)" == cpanel ]] || return 0
+    local d
+    for d in /usr/local/cpanel/logs /var/log /var/cpanel/logs \
+             /usr/local/apache/domlogs /etc/apache2/logs/domlogs; do
+        [[ -d "$d" ]] && printf '%s\n' "$d"
+    done
+}

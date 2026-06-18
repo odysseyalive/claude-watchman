@@ -1,0 +1,13 @@
+{
+  "skill": "inspect-cpanel",
+  "stage": "grammar",
+  "reads": ["cpanel_log_paths", "/etc/cpupdate.conf", "/etc/csf", "/var/cpanel"],
+  "commands": [
+    { "family": "/usr/local/cpanel/bin/whmapi1", "args": "*", "needs_sudo": false },
+    { "family": "exim", "args": "-bp*", "needs_sudo": false },
+    { "family": "/usr/local/cpanel/scripts/check_cpanel_rpms", "args": "--list*", "needs_sudo": false },
+    { "family": "imunify360-agent", "args": "*", "needs_sudo": false }
+  ],
+  "resolver_ops": [],
+  "fixes": []
+}

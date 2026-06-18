@@ -47,7 +47,7 @@ For any other unrecognized argument, list the in-session verbs and stop.
 
 1. Execute each OBSERVE skill in order, following its `SKILL.md` exactly:
    `skills/grammar/audit-system`, `skills/grammar/inventory-services`,
-   `skills/grammar/inspect-web-config`, `skills/grammar/inspect-logs`,
+   `skills/grammar/inspect-web-config`, `skills/grammar/inspect-cpanel`, `skills/grammar/inspect-logs`,
    `skills/grammar/check-log-retention`, `skills/grammar/check-shell-history`,
    `skills/grammar/check-security-currency`, `skills/grammar/check-capacity`.
 2. Then each ANALYZE skill: `skills/logic/diagnose-crash`,
