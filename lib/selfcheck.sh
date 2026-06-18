@@ -4,9 +4,16 @@
 # permissions, mail, auth, real observe commands) from "does headless Claude
 # execute the skills correctly" — which only `/watchman audit` (live) can prove.
 #
-# > PRIME DIRECTIVE. selfcheck is READ-ONLY: it observes and reports, and writes
-# > nothing except a throwaway scratch DB under a temp dir (removed before return).
-# > It never installs, never edits config, never touches the real journal's data.
+# > PRIME DIRECTIVE. selfcheck is READ-ONLY with ONE narrow, non-destructive
+# > exception: it re-asserts the loop's permission safety-contracts in
+# > .claude/settings.json (defaultMode=dontAsk + the destructive deny base) via
+# > preflight's base-settings writer — because selfcheck is on the path to a loop
+# > start and a drifted base silently weakens the seatbelt. That repair only
+# > TIGHTENS protection and preserves operator tuning; it never loosens, deletes,
+# > or overwrites data, so the Prime Directive permits it as create-or-update.
+# > Otherwise selfcheck writes nothing except a throwaway scratch DB under a temp
+# > dir (removed before return): it never installs, never edits other config, and
+# > never touches the real journal's data.
 #
 # Exit code: 0 = healthy (warnings allowed); 1 = a CRITICAL plumbing fault
 # (missing sqlite3/jq, broken journal code, syntax-broken lib) that would stop the
@@ -122,8 +129,23 @@ selfcheck_run() {
     _hdr "5. Permission artifacts"
     local cdir="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
     if [[ -f "$cdir/settings.json" ]]; then
-        local mode; mode="$(jq -r '.permissions.defaultMode // "unset"' "$cdir/settings.json" 2>/dev/null)"
-        [[ "$mode" == dontAsk ]] && _ok "settings.json defaultMode=dontAsk" || _warn "settings.json defaultMode=$mode — the loop needs dontAsk; run 'watchman preflight' to repair it (use 'watchman dev' for edit sessions)"
+        local mode_before; mode_before="$(jq -r '.permissions.defaultMode // "unset"' "$cdir/settings.json" 2>/dev/null)" || mode_before="unset"
+        # selfcheck is on the path to a loop start, so don't merely WARN on drift —
+        # repair it. Reuse preflight's base-settings writer (the single source of
+        # truth): idempotent, it restores defaultMode=dontAsk and re-asserts the
+        # destructive deny base without clobbering operator tuning. A no-op when the
+        # base is already intact; a graceful warn if we can't write it (e.g. run as
+        # non-root against a root-owned file).
+        declare -F preflight_write_base_settings >/dev/null 2>&1 || source "$_SC_LIB_DIR/preflight.sh"
+        preflight_write_base_settings "$cdir" >/dev/null 2>&1 || true
+        local mode_after; mode_after="$(jq -r '.permissions.defaultMode // "unset"' "$cdir/settings.json" 2>/dev/null)" || mode_after="unset"
+        if [[ "$mode_after" != dontAsk ]]; then
+            _warn "settings.json defaultMode=$mode_after — the loop needs dontAsk and auto-repair failed; run 'watchman preflight' as root or fix by hand (use 'watchman dev' for edit sessions)"
+        elif [[ "$mode_before" == dontAsk ]]; then
+            _ok "settings.json defaultMode=dontAsk (deny base re-asserted)"
+        else
+            _ok "settings.json defaultMode repaired ($mode_before -> dontAsk) + deny base re-asserted"
+        fi
     else _warn "settings.json absent — run install.sh / watchman preflight"; fi
     if [[ -f "$cdir/settings.local.json" ]]; then
         local na; na="$(jq -r '.permissions.allow | length' "$cdir/settings.local.json" 2>/dev/null)"

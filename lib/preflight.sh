@@ -311,40 +311,52 @@ _pf_deny_base() {
 }
 
 # --- Base policy (fixed, not manifest-derived) ------------------------------
-# Written to <claude>/settings.json ONLY if absent — never clobbered, since the
-# operator may tune it. defaultMode dontAsk: anything in allow runs, everything
-# else auto-DENIES and fails loudly (no silent hang, no prompt). The deny list is
-# defense-in-depth against destructive actions that an allow can never override.
+# The base IS the loop/audit profile. When ABSENT we write it fresh. When PRESENT
+# we do NOT clobber operator tuning — but we DO re-assert the loop's two safety
+# CONTRACTS, because each can silently drift and each quietly breaks the seatbelt:
+#   1. defaultMode=dontAsk — anything unallowed auto-denies and fails loudly (no
+#      silent hang, no prompt). A Shift-Tab mode-cycle can persist a weaker mode.
+#   2. the destructive deny base — the backstop an allow can never override. A
+#      stray edit can truncate it, removing the loop's protection against
+#      rm/dd/mkfs/systemctl-stop/etc. even though it runs as root.
+# defaultMode is repaired back to dontAsk; the deny base is UNIONED into whatever
+# denies are present (operator-added denies preserved in order, the backstop's
+# rules appended where missing). Both repairs are non-destructive — they only
+# TIGHTEN the seatbelt, never loosen or delete — so the Prime Directive permits
+# them as create-or-update. Maintainers who want acceptEdits use `watchman dev`
+# (its own profile via --permission-mode), never the base; fix/dev pass
+# --permission-mode explicitly, so re-asserting the base never affects them.
 preflight_write_base_settings() {
     local claude_dir="$1" target="$1/settings.json"
     mkdir -p "$claude_dir"
+    local deny; deny="$(_pf_deny_base)"
     if [[ -e "$target" ]]; then
-        # The base IS the loop/audit profile, and the unattended loop REQUIRES
-        # defaultMode=dontAsk: anything unallowed auto-denies and fails loudly, with
-        # no TTY prompt to hang on. That mode is a safety CONTRACT, not operator
-        # tuning — yet an interactive Shift-Tab mode-cycle (or a stray session) can
-        # silently persist a different defaultMode into this file and quietly break
-        # the loop. So we NEVER clobber the operator's deny list or other keys, but
-        # we DO repair a drifted defaultMode back to dontAsk. Maintainers who want
-        # acceptEdits use `watchman dev` (its own profile via --permission-mode),
-        # never the base. fix/dev pass --permission-mode explicitly, so repairing the
-        # base never affects them.
-        local cur; cur="$(jq -r '.permissions.defaultMode // "unset"' "$target" 2>/dev/null)"
-        if [[ "$cur" == dontAsk ]]; then
-            echo "preflight: base settings.json present (defaultMode=dontAsk) — operator tuning kept." >&2
+        local cur; cur="$(jq -r '.permissions.defaultMode // "unset"' "$target" 2>/dev/null)" || cur="unset"
+        # How many deny-base rules are MISSING from the present file (0 = intact).
+        local missing; missing="$(jq -r --arg deny "$deny" \
+            '(($deny | split("\n") | map(select(length>0))) - (.permissions.deny // [])) | length' \
+            "$target" 2>/dev/null)" || missing=""
+        if [[ "$cur" == dontAsk && "${missing:-x}" == 0 ]]; then
+            echo "preflight: base settings.json present (defaultMode=dontAsk, deny base intact) — operator tuning kept." >&2
+            return 0
+        fi
+        local tmp; tmp="$(mktemp "${target}.XXXXXX" 2>/dev/null)" || tmp="${target}.tmp"
+        # Re-assert BOTH contracts in one pass: defaultMode=dontAsk, and deny =
+        # existing denies (in their order) + any base rules not already present.
+        if jq --arg deny "$deny" '
+              ($deny | split("\n") | map(select(length>0)))      as $base
+            | (.permissions.deny // [])                          as $existing
+            | .permissions.defaultMode = "dontAsk"
+            | .permissions.deny = ($existing + ($base - $existing))
+            ' "$target" > "$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+            mv "$tmp" "$target"
+            echo "preflight: repaired base settings.json (defaultMode=$cur->dontAsk, +${missing:-?} deny-base rule(s) re-asserted) — the loop requires both (use 'watchman dev' for an edit session)." >&2
         else
-            local tmp; tmp="$(mktemp "${target}.XXXXXX" 2>/dev/null)" || tmp="${target}.tmp"
-            if jq '.permissions.defaultMode = "dontAsk"' "$target" > "$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
-                mv "$tmp" "$target"
-                echo "preflight: repaired base settings.json defaultMode ($cur -> dontAsk) — the loop requires it (use 'watchman dev' for an edit session)." >&2
-            else
-                rm -f "$tmp"
-                echo "preflight: WARNING base settings.json defaultMode=$cur (loop needs dontAsk) and auto-repair failed — fix it by hand." >&2
-            fi
+            rm -f "$tmp"
+            echo "preflight: WARNING base settings.json could not be normalized (defaultMode=$cur, loop needs dontAsk + full deny base) and auto-repair failed — fix it by hand." >&2
         fi
         return 0
     fi
-    local deny; deny="$(_pf_deny_base)"
     jq -n --arg deny "$deny" '
       {permissions: {
          defaultMode: "dontAsk",
