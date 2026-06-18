@@ -26,6 +26,7 @@ lib/io-courtesy.sh
 lib/journal.sh
 lib/preflight.sh
 lib/profile.sh
+lib/sectools.sh
 lib/security_currency.sh
 lib/selfcheck.sh
 lib/shellhist.sh
@@ -49,6 +50,8 @@ skills/grammar/inspect-logs/manifest.json
 skills/grammar/inspect-logs/SKILL.md
 skills/grammar/inspect-web-config/manifest.json
 skills/grammar/inspect-web-config/SKILL.md
+skills/grammar/inventory-security-tools/manifest.json
+skills/grammar/inventory-security-tools/SKILL.md
 skills/grammar/inventory-services/manifest.json
 skills/grammar/inventory-services/SKILL.md
 skills/logic/baseline-network/manifest.json

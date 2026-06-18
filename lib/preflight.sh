@@ -44,6 +44,10 @@ WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$_PF_LIB_DIR/.." && pwd)}"
 source "$_PF_LIB_DIR/distro.sh"
 # shellcheck source=lib/profile.sh
 source "$_PF_LIB_DIR/profile.sh"
+# shellcheck source=lib/sectools.sh
+# Sourced so the sectool_status resolver_op and the sectool_log_paths read token
+# (the security-tooling registry) resolve to the right commands/paths for THIS host.
+source "$_PF_LIB_DIR/sectools.sh"
 
 WATCHMAN_CLAUDE_DIR="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
 
@@ -117,6 +121,11 @@ _pf_expand_resolver_op() {
                 selinux)  printf 'getenforce*\t0\t-\n'; printf 'sestatus*\t0\t-\n' ;;
                 none)     : ;;   # no command — absence is the finding, nothing to run
             esac ;;
+        sectool_status)
+            # The security-tooling registry: for each defensive tool PRESENT on this
+            # host that needs a privileged observe command, grant exactly that command.
+            # sectools.sh already emits the <args>\t<sudo>\t<sudoers-cmd> TSV contract.
+            sectools_observe_commands ;;
         *) echo "preflight: unknown resolver_op '$op'" >&2 ;;
     esac
 }

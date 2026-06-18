@@ -47,6 +47,7 @@ For any other unrecognized argument, list the in-session verbs and stop.
 
 1. Execute each OBSERVE skill in order, following its `SKILL.md` exactly:
    `skills/grammar/audit-system`, `skills/grammar/inventory-services`,
+   `skills/grammar/inventory-security-tools`,
    `skills/grammar/inspect-web-config`, `skills/grammar/inspect-cpanel`, `skills/grammar/inspect-logs`,
    `skills/grammar/check-log-retention`, `skills/grammar/check-shell-history`,
    `skills/grammar/check-security-currency`, `skills/grammar/check-capacity`.
@@ -98,7 +99,10 @@ Directive's stop-warn-ask gate governs every destructive action.
 ## inventory — What is installed and how it serves
 
 Execute `skills/grammar/inventory-services/SKILL.md` exactly and report what is installed
-and how it serves (web server, database, php-fpm, etc.). Journal findings only through
+and how it serves (web server, database, php-fpm, etc.). Then execute
+`skills/grammar/inventory-security-tools/SKILL.md` exactly to discover the host's defensive
+tooling (fail2ban, CrowdSec, rkhunter, auditd, ClamAV, AIDE, …), whether each is effective,
+and any whole class of defense that is missing. Journal findings only through
 `lib/journal.sh`. Observe only — no changes.
 
 ## stats — Privacy-respecting web traffic analytics (on demand, NOT the loop)

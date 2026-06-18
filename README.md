@@ -32,7 +32,7 @@ pieces talk to each other.
 
 | Stage | Role | What it does |
 |-------|------|--------------|
-| **Observe** | grammar skills | Read the machine: hardening scan, services, logs, log retention, capacity. |
+| **Observe** | grammar skills | Read the machine: hardening scan, services, the host's own defensive tooling, logs, log retention, capacity. |
 | **Analyze** | logic skills | Make sense of it: OOM/crash postmortem, network baseline, dedupe, compute the delta. |
 | **Act & report** | rhetoric skills | Fix what's safe (with your OK), summarize, and email when a threshold trips. |
 
@@ -251,7 +251,7 @@ and the deny base above still holds. Maintainers get a third profile via `watchm
 |---|--------|-------------|
 | Looks for | Inbound attack surface: exposed ports, web headers, CORS, SSH hardening, probes, and request-rate spikes (DDoS/abuse) that propose a firewall block | What the machine talks *to*: new outbound connections vs. a baseline |
 | Top concern | Public-facing exposure | **Log retention**: volatile journald loses the forensic trail on reboot |
-| Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity, forensic-trail tampering (shell history / login records wiped), and **security currency**: pending updates, known-CVE packages, threat-intel/signature freshness, and whether auto-update is even on | |
+| Both | Lynis hardening index over time, capacity (disk/inodes/memory), OOM/crash postmortem, package integrity, forensic-trail tampering (shell history / login records wiped), **security currency** (pending updates, known-CVE packages, threat-intel/signature freshness, and whether auto-update is even on), and the host's own **defensive tooling** — discovers what's installed (fail2ban, CrowdSec, rkhunter, auditd, ClamAV, AIDE…), checks each is actually effective, and flags a whole class of defense that's missing | |
 
 ## Web analytics, without the trackers
 

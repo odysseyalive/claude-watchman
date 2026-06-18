@@ -61,6 +61,13 @@ security_currency:medium:medium
 diagnostic_deferred:info:info
 self_footprint:info:info
 service_inventory:info:info
+sectool_inventory:info:info
+sectool_health:medium:low
+defense_gap_bruteforce:medium:low
+defense_gap_rootkit:low:-
+defense_gap_audit:low:-
+defense_gap_integrity:low:low
+defense_gap_antivirus:low:low
 cpanel_cphulk_disabled:high:-
 cpanel_eol_php:medium:-
 cpanel_autoupdate_off:medium:-

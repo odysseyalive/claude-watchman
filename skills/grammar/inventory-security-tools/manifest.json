@@ -1,0 +1,8 @@
+{
+  "skill": "inventory-security-tools",
+  "stage": "grammar",
+  "reads": ["sectool_log_paths"],
+  "commands": [],
+  "resolver_ops": ["sectool_status", "service_status", "pkg_query"],
+  "fixes": []
+}

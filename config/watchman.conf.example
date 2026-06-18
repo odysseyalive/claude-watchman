@@ -28,6 +28,14 @@ WATCHMAN_MEM_WARN_PCT=90
 WATCHMAN_UPDATE_STALE_DAYS=30      # package metadata older than this (days) = stale view of updates
 WATCHMAN_SIG_STALE_DAYS=7          # ClamAV/threat-intel signatures older than this (days) = stale
 
+# --- Security tooling discovery (adopt the box's own defenses) --------------
+# inventory-security-tools discovers the defensive tools already installed (fail2ban,
+# sshguard, CrowdSec, rkhunter, chkrootkit, auditd, ClamAV, AIDE, debsecan/arch-audit,
+# wazuh/ossec), reports whether each is actually effective, and flags a whole CLASS of
+# defense that is missing (brute-force protection, rootkit checking, host audit,
+# file-integrity baseline). It never installs or enables anything — gaps are manual-tier.
+WATCHMAN_FLAG_AV_ABSENT=no         # also flag a MISSING antivirus engine (ClamAV) — off by default (noisy on a typical Linux server; turn on for mail/file servers)
+
 # --- I/O courtesy (never degrade a busy server) -----------------------------
 # claude-watchman's heavy reads (integrity verify, full log scans, Lynis, journald
 # walks) run at a priority set by its ROLE, and are SKIPPED ("deferred") when the box
