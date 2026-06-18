@@ -89,6 +89,13 @@ prompt IS the risk-tier confirmation), and the destructive deny base still block
 `rm`/`dd`/`systemctl stop`/sudoers. If you find mutations silently denied here, you are in
 the wrong session — exit and relaunch with `watchman fix`.
 
+The launcher opens the session **already running this command**: it submits `Run /watchman
+fix` as the first prompt (natural language, not a bare slash command — Claude Code drops a
+startup positional prompt that begins with `/`, but executes one that reads as a normal
+turn), so the operator lands in the remediation flow instead of a blank prompt. If you
+ever do start from a blank prompt, just type `/watchman fix` live — typed slash commands
+work in-session.
+
 Execute `skills/rhetoric/fix-redflag/SKILL.md` exactly. For each finding, act STRICTLY
 within its `risk_tier`: `safe` on simple approval; `review` only after showing the exact
 change and getting explicit per-finding confirmation (firewall rules MUST show the exact

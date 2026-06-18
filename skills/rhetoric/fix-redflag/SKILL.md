@@ -26,7 +26,10 @@ the unattended loop cannot apply them — only the operator-launched fix session
 
 ## When to use
 
-Only via `/watchman fix`, interactively, with the operator present to confirm.
+Only via `/watchman fix`, interactively, with the operator present to confirm. The
+operator reaches it by running `watchman fix` at the shell: the launcher opens the
+FIX-profile session and auto-runs the fixer (it submits `Run /watchman fix` as the first
+prompt), so they don't have to type anything to start.
 
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Risk-tier gate (a hard safety boundary)

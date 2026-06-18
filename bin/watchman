@@ -111,10 +111,14 @@ _launch_session() {
     [[ -f "$settings" ]] || {
         echo "watchman: $file not found — run 'watchman preflight' to generate it." >&2; exit 1; }
     cd "$WATCHMAN_ROOT" || exit 1
-    # When an autorun command is given, hand it to Claude Code as the session's
+    # When an autorun prompt is given, hand it to Claude Code as the session's
     # FIRST prompt (claude [options] [prompt]) so the operator doesn't land on a
     # blank prompt wondering what to type — the session opens already running it.
-    # No autorun (e.g. dev, whose work is freeform) → launch bare with a hint.
+    # NB it must be NATURAL LANGUAGE, not a bare slash command: Claude Code only
+    # executes a slash command typed LIVE in-session, and silently DROPS a startup
+    # positional prompt that begins with '/'. So we pass "Run /watchman fix" (leading
+    # word, not leading slash) — submitted as a normal turn, which makes Claude invoke
+    # the watchman skill in fix mode. No autorun (e.g. dev) → launch bare with a hint.
     if [[ -n "$autorun" ]]; then
         cat >&2 <<EOF
 watchman: $note
@@ -170,7 +174,7 @@ case "$verb" in
         # the destructive deny base retained. The loop's dontAsk session can't do this.
         _launch_session settings.fix.json default \
             "remediation session — per-finding prompts, safe fixes pre-approved, destructive ops denied." \
-            "/watchman fix" "/watchman fix" ;;
+            "/watchman fix" "Run /watchman fix" ;;
 
     dev)
         # Maintainer session: acceptEdits + repo-write, so editing the product no longer

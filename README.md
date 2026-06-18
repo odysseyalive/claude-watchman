@@ -149,12 +149,12 @@ shell commands; the AI features run inside a Claude Code session as `/watchman <
 so their token use is always in front of you.
 
 **The two halves run in two different places, and they're not interchangeable.** The
-shell verbs (`selfcheck`, `preflight`, `update`) are typed at your **OS terminal**, the
-same prompt where you'd type `ls`, with **no** leading slash. The `/watchman` verbs are
-typed at the **Claude Code prompt**, *inside* a session, **with** the leading slash. Typing
-a shell verb like `watchman update` into the Claude prompt won't update anything; Claude
-will just point you back to your terminal (and vice-versa). When in doubt: no slash → your
-shell; slash → inside `claude`.
+shell verbs (`selfcheck`, `preflight`, `update`, plus the `fix`/`dev` *launchers*) are
+typed at your **OS terminal**, the same prompt where you'd type `ls`, with **no** leading
+slash. The `/watchman` verbs are typed at the **Claude Code prompt**, *inside* a session,
+**with** the leading slash. Typing a shell verb like `watchman update` into the Claude
+prompt won't update anything; Claude will just point you back to your terminal (and
+vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 
 **Shell CLI**, bash only, no Claude, no tokens (run at your OS terminal):
 
@@ -163,6 +163,8 @@ shell; slash → inside `claude`.
 | `watchman selfcheck` | Bash-only plumbing check. Run first on any new host. |
 | `watchman preflight` | Regenerate the Claude allowlist + the in-session `/watchman` command. |
 | `watchman update` | Re-fetch the latest product (manifest, no git) + regenerate locals. Same as installing. |
+| `watchman fix` | **Launcher** (spends nothing itself): opens a Claude session in the FIX profile and **auto-runs the fixer for you** — you don't type anything, you just confirm each change. |
+| `watchman dev` | **Launcher** for maintainers: opens a session in the DEV profile (repo-write, `acceptEdits`) for editing the source. |
 
 **In a Claude Code session**, AI features, visible token use (typed at the `claude` prompt, with the slash):
 
@@ -171,13 +173,17 @@ shell; slash → inside `claude`.
 | `/watchman audit` | Observe + analyze, journal findings. No fixes. |
 | `/watchman report` | Plain-language summary of the journal. |
 | `/watchman loop` | One pass: observe → journal → delta → email if it matters. |
-| `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. |
+| `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. Don't type this one in a normal session — launch it from the shell with `watchman fix`, which opens the FIX profile and runs it for you (a plain session can't apply fixes; see below). |
 | `/watchman inventory` | What's installed and how it serves. |
 | `/watchman stats` | Privacy-respecting web traffic analytics from access logs. On demand, not the loop. |
 
 `fix` is the only verb that ever changes the system, and it's always interactive. It
 shows you the exact change, asks before applying anything risky, and never touches a
-firewall rule or SSH config without showing the rule first.
+firewall rule or SSH config without showing the rule first. Because a session's
+permission mode is fixed at startup, `fix` can't run in your loop's read-only session — so
+you start it from the shell with `watchman fix`, which launches a fresh FIX-profile session
+**and runs the fixer automatically** (it submits `Run /watchman fix` as the first prompt,
+so you land in the remediation flow, not a blank prompt).
 
 ## Running it
 
@@ -209,6 +215,18 @@ Inside it, launch Claude as root (`claude`, run `/login` once), then start the l
 ```
 
 Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
+
+**Fixing what it finds.** Don't run `/watchman fix` in the loop or a plain session — it
+can't apply anything there (that's the seatbelt). Instead, from your shell run:
+
+```bash
+watchman fix
+```
+
+That opens a fresh Claude session in the FIX profile and **runs the fixer for you** — you
+don't have to type the command, you just review and confirm each change. Safe toggles are
+pre-approved; anything riskier prompts per finding, and the destructive deny base always
+holds.
 
 **It won't take down a busy server, and it knows its own footprint.** The heavy reads
 (integrity verification, full log scans, Lynis, journald walks) run at a priority set by
