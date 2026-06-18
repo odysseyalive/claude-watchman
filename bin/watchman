@@ -56,8 +56,8 @@ permission mode is fixed at session startup and cannot be changed from inside):
 
   watchman fix         LAUNCH a remediation session — FIX profile, "default" mode: every
                        fix prompts per finding (the risk-tier confirmation), safe toggles
-                       are pre-approved, the destructive deny base is retained. Then run
-                       /watchman fix inside it.
+                       are pre-approved, the destructive deny base is retained. The session
+                       opens already running /watchman fix — nothing to type.
   watchman dev         LAUNCH a maintainer session — DEV profile, acceptEdits: source edits
                        in the product tree auto-apply (no settings.json hand-edit + restart),
                        Bash still prompts, deny base retained.
@@ -104,17 +104,28 @@ EOF
 # two LAUNCH a fresh session bound to the matching generated profile, and the
 # operator then runs the slash command inside it. (preflight generates the files.)
 _launch_session() {
-    local file="$1" mode="$2" note="$3" hint="$4"
+    local file="$1" mode="$2" note="$3" hint="$4" autorun="${5:-}"
     local settings="$WATCHMAN_CLAUDE_DIR/$file"
     command -v claude >/dev/null 2>&1 || {
         echo "watchman: the 'claude' CLI is not on PATH — install Claude Code first." >&2; exit 1; }
     [[ -f "$settings" ]] || {
         echo "watchman: $file not found — run 'watchman preflight' to generate it." >&2; exit 1; }
+    cd "$WATCHMAN_ROOT" || exit 1
+    # When an autorun command is given, hand it to Claude Code as the session's
+    # FIRST prompt (claude [options] [prompt]) so the operator doesn't land on a
+    # blank prompt wondering what to type — the session opens already running it.
+    # No autorun (e.g. dev, whose work is freeform) → launch bare with a hint.
+    if [[ -n "$autorun" ]]; then
+        cat >&2 <<EOF
+watchman: $note
+Opening a Claude Code session and running:  $autorun
+EOF
+        exec claude --permission-mode "$mode" --settings "$settings" "$autorun"
+    fi
     cat >&2 <<EOF
 watchman: $note
 Launching a Claude Code session in this profile. Inside it, run:  $hint
 EOF
-    cd "$WATCHMAN_ROOT" || exit 1
     exec claude --permission-mode "$mode" --settings "$settings"
 }
 
@@ -159,7 +170,7 @@ case "$verb" in
         # the destructive deny base retained. The loop's dontAsk session can't do this.
         _launch_session settings.fix.json default \
             "remediation session — per-finding prompts, safe fixes pre-approved, destructive ops denied." \
-            "/watchman fix" ;;
+            "/watchman fix" "/watchman fix" ;;
 
     dev)
         # Maintainer session: acceptEdits + repo-write, so editing the product no longer
