@@ -29,15 +29,17 @@ through `lib/journal.sh` — never touch `findings.db` directly. If no verb is g
 the verbs and stop.
 
 **Shell-CLI verbs are not handled here — redirect, don't run.** `selfcheck`, `preflight`,
-and `update` are the zero-token, bash-only half of claude-watchman; they live in the
-`watchman` shell CLI on purpose (no Claude, no tokens). If the argument is one of these,
-do **not** read files or improvise — print this one-liner and stop, mirroring the shell's
-own redirect of the AI verbs:
+`update`, and `uninstall` are the zero-token, bash-only half of claude-watchman; they live
+in the `watchman` shell CLI on purpose (no Claude, no tokens). `uninstall` especially must
+**never** be improvised in-session: it is destructive, and its tiered stop-warn-ask gating
+lives in the shell script, not here. If the argument is one of these, do **not** read files
+or improvise — print this one-liner and stop, mirroring the shell's own redirect of the AI
+verbs:
 
 > `<verb>` is a zero-token shell command — run **`watchman <verb>`** in your shell, not
 > here. (`selfcheck` = plumbing check, `preflight` = regenerate the allowlist + this
-> command, `update` = re-fetch the latest product.) The in-session verbs are: audit,
-> report, loop, fix, inventory, stats.
+> command, `update` = re-fetch the latest product, `uninstall` = remove claude-watchman.)
+> The in-session verbs are: audit, report, loop, fix, inventory, stats.
 
 For any other unrecognized argument, list the in-session verbs and stop.
 
@@ -58,6 +60,14 @@ For any other unrecognized argument, list the in-session verbs and stop.
 Journal every finding through `lib/journal.sh` (create-or-update; never duplicate). Do
 **not** apply any remediation. When done, tell the operator to run `/watchman report`
 for the summary.
+
+**This session cannot fix anything — say so.** `audit` (whether launched with `watchman
+audit`, `watchman safe`, or typed live) runs under the DEFAULT read-only profile, where
+every mutating command auto-denies. So when you surface findings that need remediation,
+warn the operator in plain language: to apply fixes they must **exit Claude and run
+`watchman fix` from the shell** — that launcher opens a fresh session in the FIX profile
+with the correct (mutating) permissions. Do not attempt the fixes here; you do not have
+the permissions, and trying will only hit dead-end denials.
 
 ## report — Plain-language summary of the journal
 

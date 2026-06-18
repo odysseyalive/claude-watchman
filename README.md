@@ -42,18 +42,23 @@ can raise is a **regression**: something you fixed that came back.
 
 ## Install
 
+**Run this as `root`, from root's home directory (`/root`).** claude-watchman runs as
+root (it reads your logs and journal directly, with no service user), so install it as
+root too. Log in as root — or `sudo -i` to get a root shell in `/root` — before you start.
+
 **No `git clone` needed.** Make a directory for claude-watchman and run the installer
 from inside it. It fetches the project file-by-file from a manifest into that directory.
 Use the `bash -c "$(...)"` form so the prompts keep your terminal:
 
 ```bash
-mkdir watchman && cd watchman && bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
+cd /root && mkdir watchman && cd watchman && bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
 ```
 
-Run it as root. It detects your distro and profile, installs dependencies, sets up the
-journal and config, and generates the Claude permission allowlist. Every privileged
-step asks first. There's no service user to create; claude-watchman runs as root and
-reads your logs directly. **The same command installs and updates** (see Updating).
+That puts watchman at `/root/watchman`. It detects your distro and profile, installs
+dependencies, sets up the journal and config, and generates the Claude permission
+allowlist. Every privileged step asks first. There's no service user to create;
+claude-watchman runs as root and reads your logs directly. **The same command installs
+and updates** (see Updating).
 
 ## Quick start
 
@@ -64,18 +69,28 @@ dependencies, and permissions all work on this box before you trust anything els
 watchman selfcheck
 ```
 
-**2. Launch Claude Code (this is its own step).** The `audit`, `report`, `fix`,
-`inventory`, and `stats` features are AI-driven, so they run *inside* a Claude Code
-session (where you watch the work and the token meter), **not** from the shell. Open a
-session, as root:
+**2. Launch Claude Code (this is its own step).** The `audit`, `report`, `inventory`,
+and `stats` features are AI-driven, so they run *inside* a Claude Code session (where you
+watch the work and the token meter), **not** from the shell. Open a session, as root,
+with the `watchman safe` launcher — it starts Claude in the watchman directory under the
+default read-only profile (the same context as running `claude` here):
 
 ```bash
-claude
+watchman safe
 ```
 
 The first time, type `/login` at the Claude prompt to authenticate (it remembers you
 after). You are now **inside the session**, at Claude Code's own prompt. This is the only
-place the `/watchman` slash-commands work.
+place the `/watchman` slash-commands work. (This is a read-only session — to *apply* a
+fix later, exit and run `watchman fix`, which opens the FIX profile with the right
+permissions.)
+
+> **Note: `watchman safe` is for diagnostics only.** It opens Claude under the default
+> read-only profile, which is designed to run diagnostic routines and nothing else — it
+> exists precisely to keep Claude from making any destructive decisions. Observe, analyze,
+> report: yes. Changing the system: no. Every mutating command auto-denies in this
+> session, so the only way to *apply* a fix is to exit and run `watchman fix`, where each
+> change is shown and confirmed.
 
 **3. Run your first audit, from inside that session.** At the Claude prompt, type:
 
@@ -90,9 +105,9 @@ a plain-language summary:
 /watchman report
 ```
 
-That's the whole loop: launch `claude` once, then drive it with `/watchman …` commands.
-(If you type `watchman audit` at your **shell** by mistake, it will point you back here;
-the slash-command form, inside `claude`, is the one that runs.)
+That's the whole loop: launch a session once with `watchman safe`, then drive it with
+`/watchman …` commands. (`watchman audit` and `watchman report` at your shell also work —
+they just open a session already running that slash-command for you.)
 
 **4. Turn on recurring monitoring.** Keep the loop in a tmux session so it persists but
 stays visible. Start a persistent session:
@@ -163,6 +178,10 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `watchman selfcheck` | Bash-only plumbing check. Run first on any new host. |
 | `watchman preflight` | Regenerate the Claude allowlist + the in-session `/watchman` command. |
 | `watchman update` | Re-fetch the latest product (manifest, no git) + regenerate locals. Same as installing. |
+| `watchman uninstall` | Remove claude-watchman in tiers, each confirmed (default No): unlink the CLI, drop generated artifacts, then — only if you confirm — your data/secrets and the product files. Never removes packages; never deletes the directory wholesale. `--yes` to auto-confirm. |
+| `watchman safe` | **Launcher** (spends nothing itself): opens a Claude session in the watchman directory under the default read-only profile — the easy way to start Claude in the same context. Observe only; it can apply nothing. |
+| `watchman audit` | **Launcher**: opens a read-only session (default profile) already running `/watchman audit`. |
+| `watchman report` | **Launcher**: opens a read-only session (default profile) already running `/watchman report`. |
 | `watchman fix` | **Launcher** (spends nothing itself): opens a Claude session in the FIX profile and **auto-runs the fixer for you** — you don't type anything, you just confirm each change. |
 | `watchman dev` | **Launcher** for maintainers: opens a session in the DEV profile (repo-write, `acceptEdits`) for editing the source. |
 
@@ -192,13 +211,15 @@ no service user and no sudoers to manage. Auth is Claude Code's own login; there
 API keys. The AI verbs run in-session on purpose, because Claude Code spends tokens on
 every pass and you should be able to see that happening, never a silent background daemon.
 
-**One-off checks.** Launch a session as root:
+**One-off checks.** Launch a read-only session as root with `watchman safe` (the same as
+running `claude` here, under the default observe-only profile):
 
 ```bash
-claude
+watchman safe
 ```
 
-Then, inside the session, run `/watchman audit` and `/watchman report`.
+Then, inside the session, run `/watchman audit` and `/watchman report`. (Or skip straight
+to one with `watchman audit` / `watchman report`, which open a session already running it.)
 
 **Recurring monitoring.** Keep the loop in a tmux session; it persists across logout but
 stays attachable, so you always see what it's doing and what it spends. Start a persistent
@@ -216,14 +237,14 @@ Inside it, launch Claude as root (`claude`, run `/login` once), then start the l
 
 Press `Ctrl-b` then `d` to detach; re-attach any time with `tmux attach -t watchman`.
 
-**Fixing what it finds.** Don't run `/watchman fix` in the loop or a plain session — it
+**Fixing what it finds.** Don't run `/watchman fix` in the loop or a plain session; it
 can't apply anything there (that's the seatbelt). Instead, from your shell run:
 
 ```bash
 watchman fix
 ```
 
-That opens a fresh Claude session in the FIX profile and **runs the fixer for you** — you
+That opens a fresh Claude session in the FIX profile and **runs the fixer for you**: you
 don't have to type the command, you just review and confirm each change. Safe toggles are
 pre-approved; anything riskier prompts per finding, and the destructive deny base always
 holds.
@@ -283,7 +304,7 @@ needs. `/watchman stats` reads it and prints:
   **bots-vs-humans**, and a **daily trend**.
 
 Privacy is the point: the client IP is used **only in memory** to correlate a visitor's
-requests, then discarded; it is never stored, never hashed-and-kept, never shown. The
+requests, then discarded — never stored or shown. The
 report is pure anonymous aggregates, computed entirely on your own box, with nothing
 client-side to install and **nothing leaving the host**. It reads current and rotated logs
 (including `.gz`), and breaks down per site when you serve several.
@@ -331,6 +352,25 @@ holds: every machine artifact is gitignored and untracked, **`manifest.txt` list
 the tracked product** (so a new skill can't silently fail to ship), every skill carries the
 Prime Directive, every observe/analyze skill is wired into the `/watchman` orchestration,
 and the journal schema version is in sync.
+
+## Uninstalling
+
+To remove claude-watchman, run the verb from your watchman directory:
+
+```bash
+watchman uninstall
+```
+
+It's the destructive inverse of installing, so it follows the same rule the rest of the
+tool does: it **stops and asks before each tier**, defaulting to No. First it unlinks the
+`/usr/local/bin/watchman` CLI (only if that symlink points at this install), then offers
+to drop the regenerable artifacts (`.claude/`, preflight scratch). Only if you explicitly
+confirm does it delete your **data and secrets** (`.env`, `config/watchman.conf`, the
+`journal/findings.db` history) or the **product files**. It **never removes packages**
+(sqlite3, jq, msmtp, lynis — other software may use them; it just names them) and **never
+deletes the install directory wholesale** — claude-watchman can be a guest inside a host
+repo, so it removes only the files it owns and hands the final `rm -rf` back to you. Pass
+`--yes` to auto-confirm every tier for a scripted teardown.
 
 ## What gets committed
 

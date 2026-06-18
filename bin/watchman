@@ -7,17 +7,23 @@
 #   watchman preflight   Regenerate the Claude permission profiles + in-session commands.
 #   watchman update      Re-fetch the latest product (manifest, NO git) + regenerate locals.
 #                        Same as re-running the installer. 'update --check' = maintainer guard.
+#   watchman uninstall   Remove claude-watchman — unlink the CLI + delete install's artifacts
+#                        in tiers, each confirmed (default No). Never removes packages.
+#   watchman safe        LAUNCH a read-only session under the DEFAULT profile (same as `claude` here).
+#   watchman audit       LAUNCH a read-only session under the DEFAULT profile, running /watchman audit.
+#   watchman report      LAUNCH a read-only session under the DEFAULT profile, running /watchman report.
 #   watchman fix         LAUNCH a remediation session in the FIX profile (default mode).
 #   watchman dev         LAUNCH a maintainer session in the DEV profile (acceptEdits).
 #
-# The pure-observe operations — audit, report, loop, inventory — are NOT shell verbs.
-# They run inside a Claude Code session as `/watchman <verb>`, where you see the work
-# and the token meter. Typing one of those here prints how to run it.
+# loop and inventory are NOT shell verbs. They run inside a Claude Code session as
+# `/watchman <verb>`, where you see the work and the token meter. Typing one of those
+# here prints how to run it.
 #
-# fix and dev ARE shell verbs, but only as LAUNCHERS: each needs its own permission
-# profile, and Claude Code locks the permission mode at startup, so a verb cannot
-# re-permission the session it is already in. `watchman fix` / `watchman dev` start a
-# fresh session bound to the matching generated profile; the operator works inside it.
+# safe/audit/report/fix/dev ARE shell verbs, but only as LAUNCHERS: a session's permission
+# mode and profile are fixed at startup and Claude Code never hot-reloads them, so a verb
+# cannot re-permission the session it is already in. safe/audit/report open a session under
+# the DEFAULT read-only profile (observe only — they can apply NOTHING); fix/dev open one
+# bound to the matching mutating profile. To APPLY a fix, exit and run `watchman fix`.
 #
 # Recurring monitoring uses Claude Code's built-in /loop inside a re-attachable tmux
 # session — claude-watchman ships NO scheduler:
@@ -50,10 +56,23 @@ watchman — claude-watchman shell CLI. Zero-token, bash-only verbs:
                        locals. Same command as installing; never touches your local state.
                        Maintainer subflags: '--check' = release-readiness guard;
                        '--sync' = regenerate manifest.txt from the tracked product.
+  watchman uninstall   Remove claude-watchman in tiers, each behind its own confirmation
+                       (default No): unlink the CLI, drop the generated artifacts, then
+                       (only if you confirm) your data/secrets and the product files. Never
+                       removes packages; never blindly deletes the install directory. '--yes'
+                       to auto-confirm every tier (for scripted teardown).
 
 Session launchers — each starts Claude Code in its OWN permission profile (because the
 permission mode is fixed at session startup and cannot be changed from inside):
 
+  watchman safe        LAUNCH a read-only session under the DEFAULT profile — the same
+                       .claude/settings.json + settings.local.json `claude` picks up here.
+                       An easy way to start Claude in the watchman context. Observe only;
+                       it can apply NOTHING. To apply a fix, exit and run `watchman fix`.
+  watchman audit       Like `safe`, under the DEFAULT read-only profile, but opens already
+                       running /watchman audit (observe + analyze, journal findings, no fixes).
+  watchman report      Like `safe`, under the DEFAULT read-only profile, but opens already
+                       running /watchman report (human-readable summary of the journal).
   watchman fix         LAUNCH a remediation session — FIX profile, "default" mode: every
                        fix prompts per finding (the risk-tier confirmation), safe toggles
                        are pre-approved, the destructive deny base is retained. The session
@@ -62,15 +81,14 @@ permission mode is fixed at session startup and cannot be changed from inside):
                        in the product tree auto-apply (no settings.json hand-edit + restart),
                        Bash still prompts, deny base retained.
 
-The pure-observe AI features run INSIDE a Claude Code session (run `claude` as root, then type):
+The remaining AI features run INSIDE a Claude Code session (run `watchman safe` as root, then type):
 
-  /watchman audit       Observe + Analyze: run the grammar+logic skills, journal findings. No fixes.
-  /watchman report      Human-readable summary of the journal.
   /watchman loop        ONE pass: observe → journal → correlate delta → conditional send-report.
   /watchman inventory   What is installed and how it serves.
 
-Running them in-session (not as headless shell forks) is deliberate: Claude Code spends
-tokens on every pass, and you should see that happening.
+(/watchman audit, report, and fix also work typed live in any session.) Running them
+in-session, not as headless shell forks, is deliberate: Claude Code spends tokens on
+every pass, and you should see that happening.
 
 Recurring monitoring — claude-watchman ships NO scheduler. Keep the loop in a tmux
 session (as root) so it persists AND stays visible — re-attach any time:
@@ -133,6 +151,33 @@ EOF
     exec claude --permission-mode "$mode" --settings "$settings"
 }
 
+# safe/audit/report launch Claude Code in the watchman directory under the DEFAULT
+# permission file — the .claude/settings.json + settings.local.json that Claude Code
+# auto-discovers from the working directory (the loop's read-only dontAsk allowlist). No
+# --settings / --permission-mode override: this is exactly what you get running `claude`
+# here. It is the right profile for the observe-only verbs and `safe`, which never mutate
+# — no fix-tier op is granted, so they can apply NOTHING. To remediate, the operator must
+# exit and relaunch with `watchman fix` (which binds the FIX profile). An optional autorun
+# prompt opens the session already running the slash command (same NATURAL-LANGUAGE rule
+# as _launch_session: "Run /watchman audit", never a bare leading-slash command).
+_launch_default_session() {
+    local note="$1" autorun="${2:-}"
+    command -v claude >/dev/null 2>&1 || {
+        echo "watchman: the 'claude' CLI is not on PATH — install Claude Code first." >&2; exit 1; }
+    cd "$WATCHMAN_ROOT" || exit 1
+    if [[ -n "$autorun" ]]; then
+        cat >&2 <<EOF
+watchman: $note
+Opening a Claude Code session and running:  $autorun
+EOF
+        exec claude "$autorun"
+    fi
+    cat >&2 <<EOF
+watchman: $note
+EOF
+    exec claude
+}
+
 verb="${1:-}"; shift || true
 
 case "$verb" in
@@ -166,7 +211,38 @@ case "$verb" in
         esac
         ;;
 
-    audit|report|loop|inventory) _redirect_to_session "$verb" ;;
+    uninstall)
+        # Pure bash — no claude. The destructive inverse of install: unlink the CLI,
+        # then remove install's artifacts in tiers, each behind its own confirmation
+        # (default No). Never removes packages; never blindly rm -rf the directory.
+        # shellcheck source=lib/uninstall.sh
+        source "$WATCHMAN_ROOT/lib/uninstall.sh"
+        uninstall_run "$@"
+        ;;
+
+    loop|inventory) _redirect_to_session "$verb" ;;
+
+    safe)
+        # Easy way to start Claude in the watchman context: a plain session under the
+        # DEFAULT read-only profile (same as running `claude` here). Observe only — it can
+        # apply NOTHING. To remediate, exit and run `watchman fix`.
+        _launch_default_session \
+            "read-only session under the default profile (same context as \`claude\` here). To APPLY a fix, exit and run 'watchman fix'." ;;
+
+    audit)
+        # Observe + Analyze, in a session under the DEFAULT read-only profile, opened
+        # already running /watchman audit. It journals findings but applies NO fixes — to
+        # remediate, exit and run 'watchman fix'.
+        _launch_default_session \
+            "observe + analyze session under the default read-only profile. It journals findings but applies NO fixes — to remediate, exit and run 'watchman fix'." \
+            "Run /watchman audit" ;;
+
+    report)
+        # Human-readable journal summary, in a session under the DEFAULT read-only
+        # profile, opened already running /watchman report. Read-only.
+        _launch_default_session \
+            "report session under the default read-only profile (journal summary; read-only)." \
+            "Run /watchman report" ;;
 
     fix)
         # Operator-run remediation. Needs the FIX profile: "default" mode (per-finding
