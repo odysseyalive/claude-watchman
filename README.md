@@ -127,6 +127,24 @@ Press `Ctrl-b` then `d` to detach, and the loop keeps running. It observes, jour
 emails you only when something crosses a threshold. Re-attach with
 `tmux attach -t watchman` whenever you want to see what it's doing.
 
+The loop lives **inside** the Claude Code session — `/loop` is just Claude re-running the
+pass on the interval, not a daemon or a cron job (claude-watchman ships no scheduler of its
+own). That distinction decides what survives:
+
+- **Detaching from tmux** (`Ctrl-b d`) leaves Claude running, so the loop keeps going even
+  after you log out or close the terminal. This is the normal way to leave it.
+- **Closing Claude** — exiting the session, the process dying, or rebooting the box — ends
+  the loop. Nothing restarts it automatically; you would re-launch the tmux session and run
+  `/loop` again. (tmux itself does not survive a reboot.)
+
+There is currently no in-session command to clear a running `/loop` — pressing `Esc` stops
+the iteration in flight but the next one still fires on schedule. The reliable way to stop
+the loop is to kill its tmux session, which ends Claude and tears the loop down with it:
+
+```bash
+tmux kill-session -t watchman
+```
+
 ## Email reports: fill in `.env`
 
 The loop reaches you by email, and only when a threshold trips. Those reports go out
