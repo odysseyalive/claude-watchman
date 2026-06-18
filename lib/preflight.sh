@@ -39,10 +39,28 @@ WATCHMAN_CLAUDE_DIR="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
 # Commands the framework itself runs regardless of any skill: the journal gate
 # (sqlite3) and manifest tooling (jq). Fixed, not manifest-derived — same spirit
 # as the deny base. Never needs sudo.
+#
+# Also permit INVOCATION of each in-session command (the `/<name>` slash command
+# deployed from commands/<name>/). Under dontAsk, the model autonomously calling
+# the Skill tool — including how /loop re-invokes `/watchman loop` each interval —
+# is permission-gated; without this it auto-denies and the unattended loop can
+# stall. This grants invocation ONLY; what the command may actually DO is still
+# bounded by the Bash/Read allow rules below (read-only observe + report), so it
+# is belt-and-suspenders, never a widening of the fixer's scope. One rule per
+# deployed command so it stays correct as commands are added.
+# NB: the Skill(<name>) rule syntax mirrors the documented Agent(<name>) form;
+# if a future Claude Code build names it differently, regenerate via preflight.
 _pf_framework_allow() {
     printf '%s\n' \
         'Bash(sqlite3 *)' \
         'Bash(jq *)'
+    local src="$WATCHMAN_ROOT/commands" d name
+    [[ -d "$src" ]] || return 0
+    while IFS= read -r d; do
+        [[ -f "$d/SKILL.md" ]] || continue
+        name="$(basename "$d")"
+        printf 'Skill(%s)\n' "$name"
+    done < <(find "$src" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 }
 
 # --- resolver_op expansion --------------------------------------------------
