@@ -92,6 +92,52 @@ pkg_for_cmd() {
     esac
 }
 
+# --- Security currency (keeping defenses current) --------------------------
+# NON-mutating: the command that APPLIES pending security/system updates (shown to
+# the operator, never run by the loop — applying an update can break a server).
+security_update_cmd() {
+    case "$(watchman_family)" in
+        debian) echo "sudo apt-get update && sudo apt-get upgrade" ;;
+        rhel)   echo "sudo dnf upgrade --security" ;;
+        arch)   echo "sudo pacman -Syu" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Days since the package metadata was last synced — i.e. how stale our VIEW of
+# available updates is. -1 when it cannot be determined. Read-only (no network).
+pkg_db_age_days() {
+    local f="" now
+    case "$(watchman_family)" in
+        debian) f="/var/lib/apt/periodic/update-success-stamp"; [[ -e "$f" ]] || f="/var/cache/apt/pkgcache.bin" ;;
+        arch)   f="$(ls -1t /var/lib/pacman/sync/*.db 2>/dev/null | head -1)" ;;
+        rhel)   f="/var/cache/dnf" ;;
+    esac
+    [[ -n "$f" && -e "$f" ]] || { echo -1; return; }
+    now="$(date +%s)"
+    echo $(( (now - $(stat -c%Y "$f" 2>/dev/null || echo "$now")) / 86400 ))
+}
+
+# Which CVE/vulnerability scanner is available for THIS family (none if absent).
+vuln_scanner() {
+    case "$(watchman_family)" in
+        debian) command -v debsecan   >/dev/null 2>&1 && echo debsecan   || echo none ;;
+        arch)   command -v arch-audit >/dev/null 2>&1 && echo arch-audit || echo none ;;
+        rhel)   command -v dnf        >/dev/null 2>&1 && echo dnf        || echo none ;;
+        *) echo none ;;
+    esac
+}
+
+# Run the available scanner read-only; echo vulnerable-package lines (empty = none).
+vuln_scan() {
+    case "$(vuln_scanner)" in
+        debsecan)   debsecan --only-fixed 2>/dev/null ;;
+        arch-audit) arch-audit -u 2>/dev/null ;;                       # -u: vulnerable AND fixable
+        dnf)        dnf updateinfo list --security -q 2>/dev/null | awk 'NF>=3{print $3" ("$2")"}' ;;
+        *) return 2 ;;
+    esac
+}
+
 pkg_list_installed() {
     case "$(watchman_family)" in
         debian) dpkg-query -W -f='${Package}\n' 2>/dev/null ;;

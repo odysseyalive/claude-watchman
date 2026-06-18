@@ -57,6 +57,7 @@ memory_pressure:medium:medium
 oom_recent_kill:high:high
 integrity_modified_files:high:medium
 shell_history_integrity:high:high
+security_currency:medium:medium
 diagnostic_deferred:info:info
 self_footprint:info:info
 service_inventory:info:info

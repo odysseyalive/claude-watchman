@@ -1,0 +1,12 @@
+{
+  "skill": "check-security-currency",
+  "stage": "grammar",
+  "reads": ["/var/lib/pacman", "/var/lib/apt", "/var/lib/clamav", "/var/lib/aide"],
+  "commands": [
+    { "family": "cscli", "args": "hub *", "needs_sudo": false },
+    { "family": "arch-audit", "args": "*", "needs_sudo": false },
+    { "family": "debsecan", "args": "*", "needs_sudo": false }
+  ],
+  "resolver_ops": ["pkg_query"],
+  "fixes": []
+}

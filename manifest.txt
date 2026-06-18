@@ -25,6 +25,7 @@ lib/io-courtesy.sh
 lib/journal.sh
 lib/preflight.sh
 lib/profile.sh
+lib/security_currency.sh
 lib/selfcheck.sh
 lib/shellhist.sh
 lib/smtp.sh
@@ -37,6 +38,8 @@ skills/grammar/check-capacity/manifest.json
 skills/grammar/check-capacity/SKILL.md
 skills/grammar/check-log-retention/manifest.json
 skills/grammar/check-log-retention/SKILL.md
+skills/grammar/check-security-currency/manifest.json
+skills/grammar/check-security-currency/SKILL.md
 skills/grammar/check-shell-history/manifest.json
 skills/grammar/check-shell-history/SKILL.md
 skills/grammar/inspect-logs/manifest.json

@@ -36,7 +36,7 @@ the verbs and stop.
    `skills/grammar/audit-system`, `skills/grammar/inventory-services`,
    `skills/grammar/inspect-web-config`, `skills/grammar/inspect-logs`,
    `skills/grammar/check-log-retention`, `skills/grammar/check-shell-history`,
-   `skills/grammar/check-capacity`.
+   `skills/grammar/check-security-currency`, `skills/grammar/check-capacity`.
 2. Then each ANALYZE skill: `skills/logic/diagnose-crash`,
    `skills/logic/baseline-network`, `skills/logic/correlate-findings`,
    `skills/logic/prioritize-redflags`.

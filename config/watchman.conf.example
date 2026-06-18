@@ -21,6 +21,13 @@ WATCHMAN_DISK_WARN_PCT=85           # disk usage % that raises a capacity findin
 WATCHMAN_INODE_WARN_PCT=85
 WATCHMAN_MEM_WARN_PCT=90
 
+# --- Security currency (keep defenses current) ------------------------------
+# check-security-currency flags stale defenses with the exact update command (it
+# never applies one): a stale package DB, pending security updates, known-CVE
+# packages, old ClamAV/AIDE/CrowdSec-hub data, and auto-update mechanisms that are off.
+WATCHMAN_UPDATE_STALE_DAYS=30      # package metadata older than this (days) = stale view of updates
+WATCHMAN_SIG_STALE_DAYS=7          # ClamAV/threat-intel signatures older than this (days) = stale
+
 # --- I/O courtesy (never degrade a busy server) -----------------------------
 # claude-watchman's heavy reads (integrity verify, full log scans, Lynis, journald
 # walks) run at a priority set by its ROLE, and are SKIPPED ("deferred") when the box
