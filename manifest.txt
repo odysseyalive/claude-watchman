@@ -20,6 +20,7 @@ config/watchman.conf.example
 .env.example
 install.sh
 journal/schema.sql
+lib/capacity.sh
 lib/cpanel.sh
 lib/distro.sh
 lib/io-courtesy.sh

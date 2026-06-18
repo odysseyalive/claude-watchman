@@ -26,14 +26,39 @@ Every `/watchman audit` / `/watchman loop`.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/profile.sh`; `journal_init`; load thresholds
-   from `config/watchman.conf` (`WATCHMAN_DISK_WARN_PCT`, `WATCHMAN_INODE_WARN_PCT`,
-   `WATCHMAN_MEM_WARN_PCT`).
-2. **Disk.** `df -P` per mounted filesystem; any usage ≥ threshold ⇒
-   `check_id=disk_capacity`, `target=<mountpoint>`, severity from `profile_severity`,
-   `risk_tier=safe` (the safe remediation is cleaning caches, not deleting user data —
-   the fixer never deletes data).
-3. **Inodes.** `df -iP`; ≥ threshold ⇒ `check_id=inode_capacity` (often the silent killer).
+1. **Preflight.** `source lib/journal.sh lib/profile.sh lib/io-courtesy.sh lib/capacity.sh`;
+   `journal_init`; load thresholds from `config/watchman.conf`: the warn band
+   (`WATCHMAN_DISK_WARN_PCT`, `WATCHMAN_INODE_WARN_PCT`, `WATCHMAN_MEM_WARN_PCT`) and the
+   danger band (`WATCHMAN_DISK_CRIT_PCT`, `WATCHMAN_INODE_CRIT_PCT`). A missing CRIT value
+   falls back to `95`.
+2. **Disk.** `df -P` per mounted filesystem (skip pseudo/`tmpfs`/`devtmpfs` and read-only
+   mounts — they cannot be cleaned). Two bands, computed per mountpoint:
+   - usage ≥ `WATCHMAN_DISK_CRIT_PCT` ⇒ **dangerously low: severity `critical` (red)** —
+     escalated above the profile floor, because a filesystem this full breaks services
+     silently and imminently. Put the free figure in human units (`df -Ph`) in `detail`,
+     **then name what is filling it** (next bullet).
+   - else usage ≥ `WATCHMAN_DISK_WARN_PCT` ⇒ severity from `profile_severity disk_capacity`
+     (the warn-band floor: high on a server, medium on a workstation).
+   - below warn ⇒ no finding (record the metric only).
+
+   **Critical band only — the largest-files enrichment (heavy read, deferrable).** A
+   filesystem walk is heavy, so gate it: IF `io_should_defer_heavy`, append
+   `"top-consumers scan deferred: $(io_pressure_reason)"` to `detail` and skip the walk
+   (the critical finding from `df` is cheap and is journaled regardless — only this
+   enrichment defers). OTHERWISE run `capacity_top_consumers "<mountpoint>"` and fold its
+   output (largest files, `<human-size>\t<path>`, top `WATCHMAN_TOPFILES_COUNT`) into
+   `detail` so the finding — and the email it triggers — answers "what do I delete?" The
+   engine is read-only, stays on the one filesystem (`-xdev`), and reads metadata only; it
+   NEVER frees space (that is the operator's call via `watchman fix`).
+
+   Either band: `check_id=disk_capacity`, `target=<mountpoint>`, `risk_tier=safe` (the safe
+   remediation is cleaning caches, not deleting user data — the fixer never deletes data).
+   The fingerprint is stable across bands, so a filesystem that climbs from warn into the
+   danger band UPDATES the existing finding in place (severity rises, the file list is
+   added), never duplicates it.
+3. **Inodes.** `df -iP`; ≥ `WATCHMAN_INODE_CRIT_PCT` ⇒ severity `critical` (red), else ≥
+   `WATCHMAN_INODE_WARN_PCT` ⇒ `profile_severity inode_capacity`. `check_id=inode_capacity`
+   (often the silent killer — a full inode table fails writes with space still free).
 4. **Memory.** `free`; sustained low available memory ⇒ `check_id=memory_pressure`.
    Record current values; `diagnose-crash` correlates with OOM history.
 5. **Journal size.** `journalctl --disk-usage` vs `SystemMaxUse`; record as a capacity
@@ -46,4 +71,10 @@ Every `/watchman audit` / `/watchman loop`.
 
 - `lib/profile.sh` — `profile_severity`.
 - `lib/journal.sh` — `journal_upsert`, `journal_record_metric`.
-- `config/watchman.conf` — capacity thresholds.
+- `lib/capacity.sh` — `capacity_top_consumers <mountpoint>` (read-only largest-files walk,
+  critical band only).
+- `lib/io-courtesy.sh` — `io_should_defer_heavy` / `io_pressure_reason` (defer the walk
+  under load); `capacity_top_consumers` itself runs via `io_run` when this is sourced.
+- `config/watchman.conf` — capacity thresholds: the warn band (`*_WARN_PCT`) and the
+  danger band (`WATCHMAN_DISK_CRIT_PCT` / `WATCHMAN_INODE_CRIT_PCT`) that escalates a
+  finding to `critical` (red) when space is dangerously low.

@@ -18,8 +18,13 @@ WATCHMAN_NOTIFY_ON_NEW_OUTBOUND=yes # (workstation) email on new outbound destin
 
 # --- Capacity baselines -----------------------------------------------------
 WATCHMAN_DISK_WARN_PCT=85           # disk usage % that raises a capacity finding
+WATCHMAN_DISK_CRIT_PCT=95           # disk usage % that is DANGEROUSLY low: escalates the finding to critical (red)
 WATCHMAN_INODE_WARN_PCT=85
+WATCHMAN_INODE_CRIT_PCT=95          # inode usage % that is dangerously low: escalates to critical (red)
 WATCHMAN_MEM_WARN_PCT=90
+# When a disk is in the danger band, the report lists the biggest files filling it:
+WATCHMAN_TOPFILES_COUNT=20          # how many largest files to list
+WATCHMAN_TOPFILES_MIN=+25M          # ignore files smaller than this (find -size syntax)
 
 # --- Security currency (keep defenses current) ------------------------------
 # check-security-currency flags stale defenses with the exact update command (it
