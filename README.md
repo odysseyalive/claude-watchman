@@ -112,6 +112,36 @@ Press `Ctrl-b` then `d` to detach — the loop keeps running. It observes, journ
 emails you only when something crosses a threshold. Re-attach with
 `tmux attach -t watchman` whenever you want to see what it's doing.
 
+## Email reports — fill in `.env`
+
+The loop reaches you by email, and only when a threshold trips. Those reports go out
+through **your own SMTP relay**, whose credentials live in a gitignored `.env` at the repo
+root — never in `config/watchman.conf`, never in a skill. `lib/smtp.sh` is the only code
+that reads them, and nothing leaves the host except the report itself.
+
+The installer copies the template to `.env` for you and prompts you to fill it in. To do it
+by hand from your watchman directory:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` and set these keys:
+
+| Key | What it is |
+|-----|------------|
+| `SMTP_HOST` | Relay hostname, e.g. `smtp.example.com`. |
+| `SMTP_PORT` | `587` for STARTTLS (the usual choice), `465` for implicit TLS. |
+| `SMTP_USER` | Auth user for the relay — also used as the `From:` address. |
+| `SMTP_PASS` | App password / relay secret. **Leave blank to disable email.** |
+| `REPORT_EMAIL` | The inbox where reports land — your operator address. |
+
+**Email is optional.** If `SMTP_PASS` is left blank, mail is treated as unconfigured: the
+loop logs "unconfigured" and skips sending instead of crashing, so you can run `audit`,
+`report`, `fix`, and even the loop with no relay at all — you just won't get email until
+you fill it in. `.env` is gitignored and is the single source of mail credentials; the
+committed `.env.example` is only a placeholder template.
+
 ## Commands
 
 claude-watchman splits its verbs on the token line. The ones that spend nothing are
