@@ -28,16 +28,23 @@ persisting across boots — see `check-log-retention`.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
-   `journal_init`. **I/O courtesy:** walking journald across boots can be heavy — IF
-   `io_should_defer_heavy`, journal one `capacity`/`info`/`safe` `diagnostic_deferred`
-   (`target=diagnose-crash`, detail `"deferred: $(io_pressure_reason)"`) and skip this pass.
-2. **Enumerate boots.** `io_run sudo journalctl --list-boots`. Walk them **backward**
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — use them to decide which checks apply. You do NOT pass them to `journal_upsert`
+   (it auto-resolves them; pass `"" ""`). **I/O courtesy:** walking journald across boots
+   can be heavy — IF `bash lib/wm io_should_defer_heavy`, journal one
+   `capacity`/`info`/`safe` `diagnostic_deferred`
+   (`target=diagnose-crash`): first run `bash lib/wm io_pressure_reason`, then set detail to
+   `"deferred: "` followed by its printed output (no `$(…)`). Skip this pass.
+2. **Enumerate boots.** `bash lib/wm io_run sudo journalctl --list-boots`. Walk them **backward**
    from the current boot.
 3. **Per boot, hunt the kernel's own words.** Search for
    `Out of memory`, `Killed process`, `oom-kill`, and services exiting with
    **code 137** (SIGKILL — typically the OOM killer), at idle priority:
-   `io_run sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
+   `bash lib/wm io_run sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
 4. **Identify victim and hog.** From the OOM message extract the killed process and
    the memory consumer. Correlate with `check-capacity`'s `memory_pressure` finding.
 5. **Journal a finding** `check_id=oom_recent_kill`, `target=<victim unit name>` —
@@ -53,6 +60,9 @@ persisting across boots — see `check-log-retention`.
 <!-- /origin -->
 
 ## Grounding
+
+These claude-watchman functions are reached via the dispatcher (`bash lib/wm <function> [args…]`),
+never by dot-sourcing the libs directly.
 
 - `lib/distro.sh` — `journalctl` access (resolver_op `journal_read`).
 - `lib/journal.sh` — `journal_upsert`.

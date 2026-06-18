@@ -29,14 +29,14 @@ a plain `/watchman report` (that just prints).
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/smtp.sh lib/profile.sh`; `journal_init`.
+1. **Preflight.** Run every claude-watchman function through the dispatcher — `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never `source lib/…` directly (dontAsk refuses a dot-source). Initialize with `bash lib/wm journal_init`.
 2. **Threshold check.** Read the run summary / counts. Send **only if**:
    a new finding ≥ `WATCHMAN_NOTIFY_MIN_SEVERITY`, OR a regression occurred and
    `WATCHMAN_NOTIFY_ON_REGRESSION=yes`, OR (workstation) a new outbound destination and
    `WATCHMAN_NOTIFY_ON_NEW_OUTBOUND=yes`. Otherwise **send nothing** and exit quietly.
 3. **Build the body** from `report-status` output. Subject should name the machine and
    lead with the headline (e.g. "watchman: 1 REGRESSED, 2 new high on <host>").
-4. **Dispatch** via `send_report "<subject>" <body_file>` in `lib/smtp.sh`. Never read
+4. **Dispatch** via `bash lib/wm send_report "<subject>" <body_file>` in `lib/smtp.sh`. Never read
    `.env` or SMTP creds directly — `smtp.sh` is the only gate.
 5. **Degrade gracefully.** If mail is unconfigured (`.env` missing / `SMTP_PASS` blank)
    or `msmtp` absent, `smtp.sh` logs and skips — the loop continues, never crashes.
@@ -45,7 +45,7 @@ a plain `/watchman report` (that just prints).
 
 ## Grounding
 
-- `lib/smtp.sh` — `send_report`, `smtp_is_configured` (the only reader of `.env`).
-- `lib/journal.sh` — run summary and counts.
+- `lib/smtp.sh` — `send_report`, `smtp_is_configured` (the only reader of `.env`; reached via `bash lib/wm <function>`).
+- `lib/journal.sh` — run summary and counts (reached via `bash lib/wm <function>`).
 - `config/watchman.conf` — notify thresholds.
 - `report-status` — supplies the email body.

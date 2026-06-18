@@ -26,8 +26,11 @@ Every `/watchman audit` / `/watchman loop`.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/profile.sh lib/io-courtesy.sh lib/capacity.sh`;
-   `journal_init`; load thresholds from `config/watchman.conf`: the warn band
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs (`lib/journal.sh`,
+   `lib/profile.sh`, `lib/io-courtesy.sh`, `lib/capacity.sh`) under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`; load thresholds from `config/watchman.conf`: the warn band
    (`WATCHMAN_DISK_WARN_PCT`, `WATCHMAN_INODE_WARN_PCT`, `WATCHMAN_MEM_WARN_PCT`) and the
    danger band (`WATCHMAN_DISK_CRIT_PCT`, `WATCHMAN_INODE_CRIT_PCT`). A missing CRIT value
    falls back to `95`.
@@ -37,15 +40,17 @@ Every `/watchman audit` / `/watchman loop`.
      escalated above the profile floor, because a filesystem this full breaks services
      silently and imminently. Put the free figure in human units (`df -Ph`) in `detail`,
      **then name what is filling it** (next bullet).
-   - else usage ≥ `WATCHMAN_DISK_WARN_PCT` ⇒ severity from `profile_severity disk_capacity`
-     (the warn-band floor: high on a server, medium on a workstation).
+   - else usage ≥ `WATCHMAN_DISK_WARN_PCT` ⇒ run `bash lib/wm profile_severity disk_capacity`
+     and use the printed level as the literal severity (the warn-band floor: high on a
+     server, medium on a workstation).
    - below warn ⇒ no finding (record the metric only).
 
    **Critical band only — the largest-files enrichment (heavy read, deferrable).** A
-   filesystem walk is heavy, so gate it: IF `io_should_defer_heavy`, append
-   `"top-consumers scan deferred: $(io_pressure_reason)"` to `detail` and skip the walk
+   filesystem walk is heavy, so gate it: IF `bash lib/wm io_should_defer_heavy`, run
+   `bash lib/wm io_pressure_reason` and append to `detail` the literal text
+   `"top-consumers scan deferred: "` followed by its printed output (no `$(…)`), then skip the walk
    (the critical finding from `df` is cheap and is journaled regardless — only this
-   enrichment defers). OTHERWISE run `capacity_top_consumers "<mountpoint>"` and fold its
+   enrichment defers). OTHERWISE run `bash lib/wm capacity_top_consumers "<mountpoint>"` and fold its
    output (largest files, `<human-size>\t<path>`, top `WATCHMAN_TOPFILES_COUNT`) into
    `detail` so the finding — and the email it triggers — answers "what do I delete?" The
    engine is read-only, stays on the one filesystem (`-xdev`), and reads metadata only; it
@@ -57,7 +62,8 @@ Every `/watchman audit` / `/watchman loop`.
    danger band UPDATES the existing finding in place (severity rises, the file list is
    added), never duplicates it.
 3. **Inodes.** `df -iP`; ≥ `WATCHMAN_INODE_CRIT_PCT` ⇒ severity `critical` (red), else ≥
-   `WATCHMAN_INODE_WARN_PCT` ⇒ `profile_severity inode_capacity`. `check_id=inode_capacity`
+   `WATCHMAN_INODE_WARN_PCT` ⇒ run `bash lib/wm profile_severity inode_capacity` and use the
+   printed level as the literal severity. `check_id=inode_capacity`
    (often the silent killer — a full inode table fails writes with space still free).
 4. **Memory.** `free`; sustained low available memory ⇒ `check_id=memory_pressure`.
    Record current values; `diagnose-crash` correlates with OOM history.
@@ -68,6 +74,9 @@ Every `/watchman audit` / `/watchman loop`.
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` — the
+dispatcher sources these libs internally; never `source lib/…` directly.
 
 - `lib/profile.sh` — `profile_severity`.
 - `lib/journal.sh` — `journal_upsert`, `journal_record_metric`.

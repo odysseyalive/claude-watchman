@@ -27,12 +27,12 @@ After `correlate-findings`, before `report-status`/`send-report`.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/profile.sh`; `journal_init`.
+1. **Preflight.** Run every claude-watchman function through the dispatcher — `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never `source lib/…` directly (dontAsk refuses a dot-source). Initialize with `bash lib/wm journal_init`.
 2. **Score** each `open`/`regressed` finding from: base `severity`, profile weight
-   (`profile_severity` for its `check_id`), status (`regressed` gets a boost — a fix
+   (`bash lib/wm profile_severity` for its `check_id`), status (`regressed` gets a boost — a fix
    that came back is urgent), category, and exposure (a `security` finding on a
    public-facing `server` outranks the same on a workstation).
-3. **Normalize severity where the profile demands it.** If `profile_severity` says a
+3. **Normalize severity where the profile demands it.** If `bash lib/wm profile_severity` says a
    check carries a different weight here than its default, update the finding's
    `severity` via `lib/journal.sh` so the report and thresholds agree.
 4. **Emit the ranking** for `report-status`/`send-report` to consume (highest first).
@@ -42,6 +42,6 @@ After `correlate-findings`, before `report-status`/`send-report`.
 
 ## Grounding
 
-- `lib/profile.sh` — `profile_severity`, profile exposure weighting.
-- `lib/journal.sh` — finding reads and severity updates.
+- `lib/profile.sh` — `profile_severity`, profile exposure weighting (reached via `bash lib/wm <function>`).
+- `lib/journal.sh` — finding reads and severity updates (reached via `bash lib/wm <function>`).
 - `correlate-findings` — supplies the delta this ranking emphasizes.

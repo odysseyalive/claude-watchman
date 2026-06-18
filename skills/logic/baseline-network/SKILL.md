@@ -30,7 +30,13 @@ reads the baseline; it does not rewrite it.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/profile.sh`; `journal_init`.
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — use them to decide which checks apply. You do NOT pass them to `journal_upsert`
+   (it auto-resolves them; pass `"" ""`).
    `BASELINE="journal/network-baseline.txt"`.
 2. **Snapshot.** Collect established outbound remote endpoints: `ss -tunp state established`.
    Reduce to a stable set of `address:port` (and resolved owner where available),
@@ -47,6 +53,9 @@ reads the baseline; it does not rewrite it.
 <!-- /origin -->
 
 ## Grounding
+
+These claude-watchman functions are reached via the dispatcher (`bash lib/wm <function> [args…]`),
+never by dot-sourcing the libs directly.
 
 - `lib/distro.sh` — `net_connections` (`ss`).
 - `lib/journal.sh` — `journal_upsert` (if a baseline-establishment note is recorded).

@@ -52,9 +52,18 @@ source "$_PF_LIB_DIR/sectools.sh"
 WATCHMAN_CLAUDE_DIR="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
 
 # --- Framework base ---------------------------------------------------------
-# Commands the framework itself runs regardless of any skill: the journal gate
-# (sqlite3) and manifest tooling (jq). Fixed, not manifest-derived — same spirit
-# as the deny base. Never needs sudo.
+# Commands the framework itself runs regardless of any skill: the LIB-FUNCTION
+# DISPATCHER (lib/wm), the journal gate (sqlite3), and manifest tooling (jq).
+# Fixed, not manifest-derived — same spirit as the deny base. Never needs sudo.
+#
+# `Bash(bash lib/wm:*)` is the load-bearing rule. Every skill calls its claude-watchman
+# functions through `bash lib/wm <fn> …`; lib/wm sources the libs INTERNALLY (under bash,
+# invisible to the permission layer) and dispatches. This is required because Claude Code's
+# dontAsk mode REFUSES any compound command that dot-sources a file (verified on 2.1.181) —
+# so a skill could never `source lib/… && fn …` in the single Bash call it is forced to use.
+# The colon-arg form `bash lib/wm:*` is what the permission matcher honors. The wrapper is
+# read-only: a mutation must be requested as `WM_APPLY=1 bash lib/wm <fn>`, whose leading
+# assignment makes a DIFFERENT prefix this rule does not match — so the loop cannot mutate.
 #
 # Also permit INVOCATION of each in-session command (the `/<name>` slash command
 # deployed from commands/<name>/). Under dontAsk, the model autonomously calling
@@ -68,6 +77,7 @@ WATCHMAN_CLAUDE_DIR="${WATCHMAN_CLAUDE_DIR:-$WATCHMAN_ROOT/.claude}"
 # if a future Claude Code build names it differently, regenerate via preflight.
 _pf_framework_allow() {
     printf '%s\n' \
+        'Bash(bash lib/wm:*)' \
         'Bash(sqlite3 *)' \
         'Bash(jq *)'
     local src="$WATCHMAN_ROOT/commands" d name
@@ -134,31 +144,25 @@ _pf_abspath() { command -v "$1" 2>/dev/null || printf '/usr/bin/%s' "$1"; }
 
 # --- fix_op expansion (FIX profile only) ------------------------------------
 # A manifest's fixes[] entry declares a LOGICAL mutating op + its risk_tier; this
-# maps each to the concrete allow rule(s) for THIS family, mirroring the read-only
-# _pf_expand_resolver_op. Output lines are TSV:  <allow-rule>\t<additional-dir-or->
+# maps each to the concrete allow rule(s). Output lines are TSV:  <allow-rule>\t<additional-dir-or->
 # The allow-rule is a full permission entry (Bash(...) OR Edit/Write(...)), not just
 # the Bash args, because a config edit is an Edit, not a shell command. Only SAFE-tier
 # ops are ever fed here (see _pf_collate_fix) — review-tier ops are deliberately not
 # granted so "default" mode prompts for them per finding.
+#
+# Mutating functions run through the dispatcher with the WM_APPLY env prefix:
+# `Bash(WM_APPLY=1 bash lib/wm <fn>:*)`. This is FAMILY-BLIND — lib/wm sources distro.sh,
+# whose firewall_allow/deny resolve ufw/firewalld and self-refuse nftables at runtime, so
+# the preflight no longer enumerates backends here. The WM_APPLY prefix is what lib/wm
+# requires to run a mutator AND what the read-only loop rule (`Bash(bash lib/wm:*)`) cannot
+# match — so granting it here scopes mutation to the FIX profile alone.
 _pf_expand_fix_op() {
     local op="$1"
     case "$op" in
-        firewall_allow)
-            case "$(watchman_firewall_backend)" in
-                ufw)       printf 'Bash(sudo ufw allow *)\t-\n' ;;
-                firewalld) printf 'Bash(sudo firewall-cmd --permanent --add-port=*)\t-\n'
-                           printf 'Bash(sudo firewall-cmd --reload)\t-\n' ;;
-                *)         : ;;   # nftables: operator-authored; resolver refuses to guess
-            esac ;;
-        firewall_deny)
-            case "$(watchman_firewall_backend)" in
-                ufw)       printf 'Bash(sudo ufw deny *)\t-\n' ;;
-                firewalld) printf 'Bash(sudo firewall-cmd --permanent --remove-port=*)\t-\n'
-                           printf 'Bash(sudo firewall-cmd --reload)\t-\n' ;;
-                *)         : ;;
-            esac ;;
-        service_enable)  printf 'Bash(sudo systemctl enable --now *)\t-\n' ;;
-        service_restart) printf 'Bash(sudo systemctl restart *)\t-\n' ;;
+        firewall_allow)  printf 'Bash(WM_APPLY=1 bash lib/wm firewall_allow:*)\t-\n' ;;
+        firewall_deny)   printf 'Bash(WM_APPLY=1 bash lib/wm firewall_deny:*)\t-\n' ;;
+        service_enable)  printf 'Bash(WM_APPLY=1 bash lib/wm service_enable:*)\t-\n' ;;
+        service_restart) printf 'Bash(WM_APPLY=1 bash lib/wm service_restart:*)\t-\n' ;;
         config_edit)     # config files live under /etc; grant Edit (modify) + Write (create,
                          # e.g. a new /etc/logrotate.d entry). Crown-jewel files stay denied
                          # by the deny base (shadow / sudoers), which an allow cannot override.
@@ -430,6 +434,7 @@ preflight_write_dev_settings() {
         "Read(${root}/**)" \
         "Edit(${root}/**)" \
         "Write(${root}/**)" \
+        'Bash(bash lib/wm:*)' \
         'Bash(git *)' \
         'Bash(jq *)' \
         'Bash(shellcheck *)' \

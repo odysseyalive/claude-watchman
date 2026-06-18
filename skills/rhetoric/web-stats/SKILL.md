@@ -42,19 +42,21 @@ it is an operator-run analytics feature, not an observe/analyze step.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/distro.sh lib/webstats.sh`. (No journal write — this skill
-   reports analytics, it does not record findings.)
-2. **Confirm there is a web surface.** `webserver_detect` — if no web server / no access
-   logs, say so plainly and stop. The logs are found via `webserver_log_paths` (current +
-   rotated + `.gz`).
-3. **Run the engine.** `webstats_report` computes the aggregates with awk (fast over large
-   and rotated logs; the IP never leaves the awk pass) and prints the report: page views,
-   unique visitors, total requests, bots-vs-humans %, bandwidth, top pages **by unique
-   visitors** (dedup'd so reloads don't skew), top external referrers, status-code mix, and
-   the daily trend.
-4. **Per-site (optional).** When the host serves multiple vhosts, run `webstats_report
-   <site-access-log>` per site using the log paths from `inspect-web-config`'s site index,
-   so each site gets its own numbers.
+1. **Preflight.** Run every claude-watchman function through the dispatcher — `bash lib/wm
+   <function> [args…]` — which sources the libs (`lib/distro.sh`, `lib/webstats.sh`) under
+   bash internally; never `source lib/…` directly (dontAsk refuses a dot-source). (No
+   journal write — this skill reports analytics, it does not record findings.)
+2. **Confirm there is a web surface.** `bash lib/wm webserver_detect` — if no web server /
+   no access logs, say so plainly and stop. The logs are found via `bash lib/wm
+   webserver_log_paths` (current + rotated + `.gz`).
+3. **Run the engine.** `bash lib/wm webstats_report` computes the aggregates with awk (fast
+   over large and rotated logs; the IP never leaves the awk pass) and prints the report:
+   page views, unique visitors, total requests, bots-vs-humans %, bandwidth, top pages **by
+   unique visitors** (dedup'd so reloads don't skew), top external referrers, status-code
+   mix, and the daily trend.
+4. **Per-site (optional).** When the host serves multiple vhosts, run `bash lib/wm
+   webstats_report <site-access-log>` per site using the log paths from `inspect-web-config`'s
+   site index, so each site gets its own numbers.
 5. **Present and interpret.** Show the report, then add brief plain-language insight a raw
    tool can't — e.g. "bots are 40% of raw hits, so the human page-view number is the one
    to trust", a spike in the daily trend, a 404-heavy path worth fixing, an unexpected
@@ -66,9 +68,10 @@ it is an operator-run analytics feature, not an observe/analyze step.
 
 ## Grounding
 
-- `lib/webstats.sh` — the parsing engine (`webstats_report`, `webstats_access_logs`);
-  the privacy model lives here in code.
-- `lib/distro.sh` — `webserver_detect`, `webserver_log_paths` (find the access logs).
+- `lib/webstats.sh` — the parsing engine (`webstats_report`, `webstats_access_logs`,
+  reached via `bash lib/wm`); the privacy model lives here in code.
+- `lib/distro.sh` — `webserver_detect`, `webserver_log_paths` (find the access logs),
+  reached via `bash lib/wm`.
 - `skills/grammar/inspect-web-config` — the per-site index, for per-vhost breakdowns.
 - `skills/grammar/inspect-logs` / `skills/rhetoric/fix-redflag` — the SECURITY path
   (real-IP abuse/DDoS finding → operator-confirmed firewall rule), distinct from this

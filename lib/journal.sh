@@ -154,6 +154,14 @@ journal_fingerprint() {
 journal_upsert() {
     local family="$1" profile="$2" category="$3" severity="$4" risk_tier="$5"
     local check_id="$6" target="${7:-}" title="$8" detail="${9:-}" remediation="${10:-}"
+    # family/profile are machine constants. A skill may pass them explicitly, OR pass
+    # "" "" and let the journal resolve them here — this is deliberate, because under
+    # Claude Code's dontAsk the skill CANNOT use `$(bash lib/wm watchman_family)` command
+    # substitution to compute them (a substituted command does not match the allowlist).
+    # The dispatcher always sources distro.sh before us, so the resolvers are present;
+    # the fallback keeps the fingerprint deterministic if ever called without them.
+    [[ -z "$family"  ]] && family="$(declare -F watchman_family  >/dev/null 2>&1 && watchman_family  || echo unknown)"
+    [[ -z "$profile" ]] && profile="$(declare -F watchman_profile >/dev/null 2>&1 && watchman_profile || echo unknown)"
     local fp; fp="$(journal_fingerprint "$family" "$profile" "$category" "$check_id" "$target")"
 
     local ef ep ec esv ert ecid etg etl edt erm

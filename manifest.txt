@@ -35,6 +35,7 @@ lib/smtp.sh
 lib/uninstall.sh
 lib/update.sh
 lib/webstats.sh
+hook lib/wm
 README.md
 skills/grammar/audit-system/manifest.json
 skills/grammar/audit-system/SKILL.md

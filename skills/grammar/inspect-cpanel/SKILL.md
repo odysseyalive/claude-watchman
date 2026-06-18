@@ -38,18 +38,24 @@ engine returns immediately — it is safe to run everywhere.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/cpanel.sh lib/io-courtesy.sh`;
-   `journal_init`; resolve `family`/`profile`. **Gate:** if `control_panel_detect` is not
-   `cpanel`, journal nothing and stop — this is not a cPanel box. **I/O courtesy:** the RPM
-   verification is a heavy disk read — IF `io_should_defer_heavy`, journal a
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — you do NOT pass them to journal_upsert (it auto-resolves them; pass `"" ""`).
+   **Gate:** if `bash lib/wm control_panel_detect`
+   is not `cpanel`, journal nothing and stop — this is not a cPanel box. **I/O courtesy:** the RPM
+   verification is a heavy disk read — IF `bash lib/wm io_should_defer_heavy`, journal a
    `capacity`/`info`/`safe` `diagnostic_deferred` (`target=inspect-cpanel`) and skip this pass.
-2. **Scan.** Run `cpscan`. Read-only — it calls whmapi1 GET functions, reads cPanel config,
+2. **Scan.** Run `bash lib/wm cpscan`. Read-only — it calls whmapi1 GET functions, reads cPanel config,
    counts the Exim queue, and runs `check_cpanel_rpms --list` (never `--fix`). It emits one
    TSV finding-candidate per signal:
    `category \t severity \t risk_tier \t check_id \t target \t title \t detail \t remediation`.
    No output = the control plane looks healthy.
-3. **Journal each record** through `lib/journal.sh` exactly as emitted:
-   `journal_upsert "$family" "$profile" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
+3. **Journal each record** through `lib/journal.sh` exactly as emitted (pass `"" ""` for
+   family/profile — journal_upsert auto-resolves them):
+   `bash lib/wm journal_upsert "" "" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
    `target` is the subject (cphulk / an ea-php token / exim-queue / csf ...) so the fingerprint
    is stable and a regressed defense (cPHulk turned back off, EOL PHP reintroduced) surfaces loudly.
 4. **Tiers — never apply.** Every cPanel finding is `review` or `manual`. NEVER edit a cPanel
@@ -60,6 +66,9 @@ engine returns immediately — it is safe to run everywhere.
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` (never a
+direct `source`); the lib files are where they live.
 
 - `lib/cpanel.sh` — `cpscan` (the read-only control-plane engine; thresholds
   `WATCHMAN_EXIM_QUEUE_MAX` / `WATCHMAN_EXIM_FROZEN_MAX`, EOL list `WATCHMAN_EOL_PHP`).

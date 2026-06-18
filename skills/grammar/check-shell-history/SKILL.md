@@ -41,15 +41,22 @@ profiles (any box with users or root).
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/shellhist.sh`;
-   `journal_init`. Gate: `profile_runs_check shell_history_integrity` (runs in both
-   profiles). If running non-root, note in the summary that unreadable homes were skipped.
-2. **Scan.** Run `shellhist_scan`. It enumerates login users + root (`shellhist_login_users`)
-   and emits one TSV finding-candidate per tamper indicator:
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — use them to decide which checks apply. You do NOT pass them to journal_upsert (it
+   auto-resolves them; pass `"" ""`). Gate:
+   `bash lib/wm profile_runs_check shell_history_integrity` (runs in both profiles). If running
+   non-root, note in the summary that unreadable homes were skipped.
+2. **Scan.** Run `bash lib/wm shellhist_scan`. It enumerates login users + root
+   (`bash lib/wm shellhist_login_users`) and emits one TSV finding-candidate per tamper indicator:
    `category \t severity \t risk_tier \t check_id \t target \t title \t detail \t remediation`.
    No output = the trail looks intact (journal nothing — absence is not a finding).
-3. **Journal each record** through `lib/journal.sh` exactly as emitted — for each line:
-   `journal_upsert "$family" "$profile" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
+3. **Journal each record** through the dispatcher exactly as emitted — for each line
+   (pass `"" ""` for family/profile — journal_upsert auto-resolves them):
+   `bash lib/wm journal_upsert "" "" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
    `target` is the user (or the file/path) so the fingerprint is stable and a re-wiped trail
    **regresses loudly** on the next run.
 4. **Tiers are mostly `manual`.** A wiped history is **detect-and-explain**, not auto-fixed:
@@ -65,6 +72,9 @@ profiles (any box with users or root).
 <!-- /origin -->
 
 ## Grounding
+
+These functions are reached via the dispatcher (`bash lib/wm <function> [args…]`), never by
+dot-sourcing the libs directly.
 
 - `lib/shellhist.sh` — `shellhist_scan`, `shellhist_login_users` (the metadata engine; the
   privacy model and the tamper heuristics live there).

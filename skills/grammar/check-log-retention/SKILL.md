@@ -28,11 +28,18 @@ often need fixing — surface them clearly.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`.
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — use them to decide which checks apply. You do NOT pass them to journal_upsert (it
+   auto-resolves them; pass `"" ""`).
 2. **journald persistence.** Read `Storage=` in `/etc/systemd/journald.conf` (and
    drop-ins). Volatile or unset + no `/var/log/journal/` directory ⇒ logs do NOT
-   survive reboot. Journal `check_id=log_retention_volatile`, severity from
-   `profile_severity` (higher on workstation), `risk_tier=safe`,
+   survive reboot. Journal `check_id=log_retention_volatile`; run
+   `bash lib/wm profile_severity` and use the printed level as the literal severity
+   (higher on workstation), `risk_tier=safe`,
    remediation: set `Storage=persistent` and `mkdir /var/log/journal`.
 3. **journald size limits.** Read `SystemMaxUse=`; unbounded growth is
    `check_id=journal_size_unbounded`, `risk_tier=safe`.
@@ -48,6 +55,9 @@ often need fixing — surface them clearly.
 <!-- /origin -->
 
 ## Grounding
+
+These functions are reached via the dispatcher (`bash lib/wm <function> [args…]`), never by
+dot-sourcing the libs directly.
 
 - `lib/distro.sh` — `pkg_is_installed` (logrotate), `service_status`.
 - `lib/profile.sh` — `profile_severity` (retention weighs heavier on workstation).

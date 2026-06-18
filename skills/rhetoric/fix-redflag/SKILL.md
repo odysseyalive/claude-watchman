@@ -91,7 +91,14 @@ forum hearsay, and prefer current pages over stale ones. Then:
 
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`.
+1. **Preflight.** Run every claude-watchman function through the dispatcher — `bash lib/wm
+   <function> [args…]` — which sources the libs (`lib/journal.sh`, `lib/distro.sh`,
+   `lib/profile.sh`) under bash internally; never `source lib/…` directly (dontAsk refuses a
+   dot-source). Initialize with `bash lib/wm journal_init`. **Mutating** resolver ops
+   (`firewall_allow`, `firewall_deny`, `service_enable`, `service_restart`, `pkg_install`)
+   go through `WM_APPLY=1 bash lib/wm <fn>` so the dispatcher permits them and the FIX
+   profile gates them per risk tier; every read and every journal write uses the **plain**
+   `bash lib/wm <fn>` form.
 2. **Select** the finding(s) to address from the journal (operator chooses, or work
    the prioritized list). Work the list to completion — for each finding, make a
    concrete fix offer; do not stop at describing it.
@@ -101,16 +108,17 @@ forum hearsay, and prefer current pages over stale ones. Then:
 4. **Branch on `risk_tier`** per the gate above, and lead with an offer to apply. For
    `safe`, offer ("apply now?"), and on a yes apply and set status `fixed`. For
    `review`, show the exact diff/command, offer it, get a yes for THIS finding, then
-   apply via the resolver (`firewall_allow`/`firewall_deny` show and confirm the exact
-   rule; config edits via Edit). For `manual`, set status `in-review` and hand back the
-   specific, researched steps — do not change the system.
+   apply via the resolver (`WM_APPLY=1 bash lib/wm firewall_allow`/`WM_APPLY=1 bash lib/wm
+   firewall_deny` show and confirm the exact rule; config edits via Edit). For `manual`,
+   set status `in-review` and hand back the specific, researched steps — do not change the
+   system.
 5. **Prime-Directive preflight before EVERY mutating step.** If the action would
    delete/overwrite a file, modify a database, sever access, or stop/remove a
    service/package → STOP, WARN in plain language, ASK. Proceed only on explicit
    per-action consent. (Backing up a file you are about to edit is good practice;
    deleting one is destructive.)
 6. **Verify, then journal.** After applying, verify the fix actually took (re-read
-   the config / re-list the rule), then `journal_set_status <fp> fixed "<note>"`.
+   the config / re-list the rule), then `bash lib/wm journal_set_status <fp> fixed "<note>"`.
    If verification fails, leave it `open` and say so.
 7. **Never escalate a tier.** Do not reclassify `review`/`manual` as `safe` to avoid
    a prompt. If a fix needs a tier you cannot satisfy, hand it back.
@@ -121,9 +129,9 @@ forum hearsay, and prefer current pages over stale ones. Then:
 - `WebSearch` / `WebFetch` — research a remediation you are unsure of against an
   authoritative source before proposing it (read-only; never bypasses a tier). The FIX
   profile grants both so the research path has no friction.
-- `lib/journal.sh` — `journal_set_status`, finding reads.
-- `lib/distro.sh` — `firewall_allow`/`firewall_deny`/`firewall_list`, `service_*` (all MUTATING; shown-and-confirmed).
-- `lib/profile.sh` — `profile_allows_safe_batch`.
+- `lib/journal.sh` — `journal_set_status`, finding reads (plain `bash lib/wm <fn>`).
+- `lib/distro.sh` — `firewall_allow`/`firewall_deny`/`service_enable`/`service_restart`/`pkg_install` (all MUTATING; shown-and-confirmed, invoked as `WM_APPLY=1 bash lib/wm <fn>`); read-only `firewall_list` uses plain `bash lib/wm`.
+- `lib/profile.sh` — `profile_allows_safe_batch` (plain `bash lib/wm`).
 - `manifest.json` — each `fixes[]` op carries a `risk_tier`. preflight is tier-aware:
   `safe` ops are granted in the FIX profile's allowlist (pre-approved); `review` ops are
   left OUT so "default" mode prompts per finding; `manual` is never granted. The loop's

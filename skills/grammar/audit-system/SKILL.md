@@ -28,38 +28,47 @@ hardening picture and track the Lynis hardening index as a trend.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
-   `journal_init`. Resolve `family="$(watchman_family)"` and `profile="$(watchman_profile)"`.
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — use them to decide which checks apply. You do NOT pass them to journal_upsert
+   (it auto-resolves them; pass `"" ""`).
 1b. **I/O courtesy gate (don't take down a busy server).** A full Lynis run is heavy.
-   IF `io_should_defer_heavy` → journal one `category=capacity`, `severity=info`,
-   `risk_tier=safe`, `check_id=diagnostic_deferred`, `target=audit-system` finding with
-   detail `"deferred: $(io_pressure_reason)"`, then SKIP the Lynis run this pass (retry
+   IF `bash lib/wm io_should_defer_heavy` → journal one `category=capacity`, `severity=info`,
+   `risk_tier=safe`, `check_id=diagnostic_deferred`, `target=audit-system` finding whose detail
+   is `"deferred: "` followed by the printed output of `bash lib/wm io_pressure_reason` (run it
+   first; do not use `$(…)` substitution), then SKIP the Lynis run this pass (retry
    next pass). Do NOT pile heavy I/O onto an already-loaded box.
 2. **Run Lynis** (read-only system audit) through `io_measure`, which both prices it at
    the role's I/O priority AND records what it cost:
-   `io_measure sudo lynis audit system --quiet --no-colors`. Lynis writes machine-readable
-   results to `$(log_path_lynis)` (`/var/log/lynis-report.dat`). Do not parse human
+   `bash lib/wm io_measure sudo lynis audit system --quiet --no-colors`. Lynis writes machine-readable
+   results to the Lynis report path, which `bash lib/wm log_path_lynis` prints (run it, use the
+   literal path) (`/var/log/lynis-report.dat`). Do not parse human
    stdout — parse the report file. (Any whole-filesystem integrity verification reached
-   through `integrity_verify_all` is already priced at the role's priority when
+   through `bash lib/wm integrity_verify_all` is already priced at the role's priority when
    io-courtesy is sourced.)
 2c. **Self-footprint.** Journal one `category=capacity`, `severity=info`, `risk_tier=safe`,
-   `check_id=self_footprint`, `target=audit-system` finding with detail
-   `"$(io_footprint_summary)"` so the operator (and the loop's trend) can see what
-   claude-watchman itself costs. IF `io_footprint_over_budget`, raise it to `severity=low`
+   `check_id=self_footprint`, `target=audit-system` finding whose detail is the printed output
+   of `bash lib/wm io_footprint_summary` (run it first; use its output as the detail text) so the
+   operator (and the loop's trend) can see what
+   claude-watchman itself costs. IF `bash lib/wm io_footprint_over_budget`, raise it to `severity=low`
    and note the check is getting expensive (a cue to enable incremental reads / lengthen
    its cadence).
 3. **Capture the hardening index** as a tracked metric:
    read `hardening_index=` from the report and
-   `journal_record_metric lynis_hardening_index "$value"` so the loop can chart drift.
+   `bash lib/wm journal_record_metric lynis_hardening_index "$value"` so the loop can chart drift.
 4. **Fold findings in.** For each `warning[]` and `suggestion[]` line in the report:
    - `category=security` (or `config` for non-security hardening suggestions);
    - severity: warnings → `high`/`medium`, suggestions → `low`/`info`, adjusted by
-     `profile_severity` where a matching `check_id` exists; skip checks that
-     `profile_runs_check` says do not apply to this profile;
+     `bash lib/wm profile_severity` where a matching `check_id` exists; skip checks that
+     `bash lib/wm profile_runs_check` says do not apply to this profile;
    - risk tier: default `manual` (Lynis suggestions are usually context-specific);
      only mark `safe` for unambiguous toggles;
-   - `journal_upsert "$family" "$profile" "$category" "$severity" "$risk_tier" \
-       "lynis_<test-id>" "" "$title" "$detail" "$remediation"` — pass `target=""`.
+   - `bash lib/wm journal_upsert "" "" "$category" "$severity" "$risk_tier" \
+       "lynis_<test-id>" "" "$title" "$detail" "$remediation"` — pass `"" ""` for
+     family/profile (journal_upsert auto-resolves them) and pass `target=""`.
      The `lynis_<test-id>` in `check_id` is already the stable per-finding key, so an
      empty target keeps the fingerprint identical across runs. Do NOT slug the title
      or description into target: a model-invented target varies run-to-run and the
@@ -69,6 +78,9 @@ hardening picture and track the Lynis hardening index as a trend.
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` (never a
+direct `source`); the lib files are where they live.
 
 - `lib/journal.sh` — the only gate to findings.db (`journal_upsert`, `journal_record_metric`).
 - `lib/distro.sh` — `log_path_lynis`, `watchman_family`.

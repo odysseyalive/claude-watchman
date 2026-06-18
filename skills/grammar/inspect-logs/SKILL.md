@@ -31,12 +31,15 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/io-courtesy.sh`;
-   `journal_init`; `dir="$(profile_log_direction)"` → `inbound` or `outbound`. **I/O
-   courtesy:** scanning large/rotated logs is heavy — IF `io_should_defer_heavy`, journal
-   one `capacity`/`info`/`safe` `diagnostic_deferred` (`target=inspect-logs`,
-   detail `"deferred: $(io_pressure_reason)"`) and skip the log-scan/rate steps this pass;
-   otherwise run the scans through `io_run` (the webstats engine idle-prices its reads).
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Run `bash lib/wm profile_log_direction` (prints `inbound` or
+   `outbound`) and branch on that value. **I/O courtesy:** scanning large/rotated logs is heavy — IF
+   `bash lib/wm io_should_defer_heavy`, journal one `capacity`/`info`/`safe`
+   `diagnostic_deferred` (`target=inspect-logs`, detail = `"deferred: "` followed by the printed
+   output of `bash lib/wm io_pressure_reason`, run first; no `$(…)` substitution) and skip the log-scan/rate steps this pass;
+   otherwise run the scans through `bash lib/wm io_run` (the webstats engine idle-prices its reads).
 2. **CrowdSec path (preferred).** If `cscli` is available:
    `sudo cscli alerts list -o json` and `sudo cscli decisions list -o json`
    (alert-only — never auto-ban from here, especially on a workstation). Respect the
@@ -44,16 +47,17 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 3. **Degrade gracefully.** If `cscli` is missing, journal one `config`/`low`
    finding "CrowdSec not configured — log analysis degraded" with a remediation to
    install it, then fall back:
-   - inbound: scan EVERY directory returned by `$(webserver_log_paths)` — this is
+   - inbound: scan EVERY directory listed by running `bash lib/wm webserver_log_paths` — this is
      config-derived (parsed from each present server's config), so it covers custom
      `access_log`/`CustomLog` targets, per-vhost logs, and niche servers, NOT just
-     `/var/log/{nginx,apache2,httpd}` — plus `$(log_path_auth)` (or journald via
+     `/var/log/{nginx,apache2,httpd}` — plus the auth-log path that `bash lib/wm log_path_auth`
+     prints (run it; use the literal) (or journald via
      `journalctl -u sshd`) for repeated 4xx/401/auth-failure bursts;
    - outbound: `ss -tunp` current connections; compare remote addresses against
      `journal/network-baseline.txt` from `baseline-network`.
 4. **Request-rate spikes (DDoS / abuse) — server profile.** If
-   `profile_runs_check request_rate_spike`: `source lib/webstats.sh` and run
-   `webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the
+   `bash lib/wm profile_runs_check request_rate_spike`: run
+   `bash lib/wm webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the
    peak requests-in-one-minute from a single source). It reads **incrementally** by
    default (`WATCHMAN_LOG_INCREMENTAL`) — only the new log lines since the last pass,
    so each loop's read is proportional to recent traffic, not total log size. This
@@ -61,7 +65,8 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    analytics — **keeps the real
    offending IP**, because you cannot firewall-block a hash and this is the security
    path (defending the system, a different legal basis). For each offender, journal:
-   `category=security`, `severity=$(profile_severity request_rate_spike)`,
+   `category=security`, `severity=<level>` (run `bash lib/wm profile_severity request_rate_spike`;
+   use the printed level as the literal severity),
    `risk_tier=review`, `check_id=request_rate_spike`, `target=<ip>` (per-IP, so the
    fingerprint is stable and a returning flooder regresses loudly); detail = the
    peak/min, total, and UA sample; remediation = `firewall_deny <ip>/32` — shown and
@@ -69,7 +74,7 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    (it is `review`, never auto-applied). CrowdSec, when present, is the real-time
    enforcement layer; this is the log-cadence detector that proposes the rule.
 5. **Journal findings.** Inbound probe clusters → `category=security`; new outbound
-   destinations → `category=security`, severity per `profile_severity outbound_new_connections`.
+   destinations → `category=security`, severity per `bash lib/wm profile_severity outbound_new_connections`.
    `check_id` stable per pattern/destination so re-runs update in place.
 6. **Never block or ban.** Enforcement (firewall/ban) is the operator-run fixer's
    job under the risk tiers — this skill only observes and records. The rate-spike
@@ -77,6 +82,9 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` (never a
+direct `source`); the lib files are where they live.
 
 - `lib/distro.sh` — `webserver_log_paths` / `webserver_config_roots` / `webserver_detect`
   (config-derived web-log discovery — scans `/etc` config roots and parses log directives),

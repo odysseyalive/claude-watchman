@@ -40,17 +40,25 @@ current defenses too.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/security_currency.sh lib/io-courtesy.sh`;
-   `journal_init`; resolve `family`/`profile`. Gate: `profile_runs_check security_currency`
-   (runs in both profiles). **I/O courtesy:** the package-DB queries touch disk — IF
-   `io_should_defer_heavy`, journal a `capacity`/`info`/`safe` `diagnostic_deferred`
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs (`lib/journal.sh`,
+   `lib/distro.sh`, `lib/profile.sh`, `lib/security_currency.sh`, `lib/io-courtesy.sh`)
+   under bash internally; never `source lib/…` directly (dontAsk refuses a dot-source).
+   Initialize with `bash lib/wm journal_init`. Determine the machine's family and profile by
+   running `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the
+   printed values — use them to decide which checks apply. You do NOT pass them to
+   journal_upsert (it auto-resolves them; pass `"" ""`). Gate:
+   `bash lib/wm profile_runs_check security_currency` (runs in both profiles).
+   **I/O courtesy:** the package-DB queries touch disk — IF
+   `bash lib/wm io_should_defer_heavy`, journal a `capacity`/`info`/`safe` `diagnostic_deferred`
    (`target=check-security-currency`) and skip this pass.
-2. **Scan.** Run `seccur_scan`. Read-only — it reads CACHED package state (no network sync)
+2. **Scan.** Run `bash lib/wm seccur_scan`. Read-only — it reads CACHED package state (no network sync)
    and stats local threat-intel files; it emits one TSV finding-candidate per staleness
    signal: `category \t severity \t risk_tier \t check_id \t target \t title \t detail \t remediation`.
    No output = the defenses look current.
-3. **Journal each record** through `lib/journal.sh` exactly as emitted:
-   `journal_upsert "$family" "$profile" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
+3. **Journal each record** through the dispatcher exactly as emitted
+   (pass `"" ""` for family/profile — journal_upsert auto-resolves them):
+   `bash lib/wm journal_upsert "" "" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
    `target` is the subject (packages / cve / clamav / a mechanism) so the fingerprint is
    stable and a re-stale defense **regresses loudly** on the next run.
 4. **Tiers — never apply.** `security_updates_pending`, `vuln_packages`, `auto_security_updates_off`,
@@ -63,6 +71,9 @@ current defenses too.
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` — the
+dispatcher sources these libs internally; never `source lib/…` directly.
 
 - `lib/security_currency.sh` — `seccur_scan` (the freshness engine; thresholds
   `WATCHMAN_SIG_STALE_DAYS` / `WATCHMAN_UPDATE_STALE_DAYS`).

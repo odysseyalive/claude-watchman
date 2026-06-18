@@ -43,12 +43,19 @@ server-only, via `lib/profile.sh`).
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh lib/sectools.sh lib/io-courtesy.sh`;
-   `journal_init`; resolve `family`/`profile`. **I/O courtesy:** the observe step reads a
-   couple of last-run logs; IF `io_should_defer_heavy`, journal a `capacity`/`info`/`safe`
-   `diagnostic_deferred` (`target=inventory-security-tools`, detail from `io_pressure_reason`)
-   and skip this pass.
-2. **Scan.** Run `sectools_scan`. It is read-only — it detects each registry tool, reads its
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs (`lib/journal.sh`,
+   `lib/distro.sh`, `lib/profile.sh`, `lib/sectools.sh`, `lib/io-courtesy.sh`) under bash
+   internally; never `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — use them to decide which checks apply. You do NOT pass them to `journal_upsert`
+   (it auto-resolves them; pass `"" ""`). **I/O courtesy:** the observe step reads a
+   couple of last-run logs; IF `bash lib/wm io_should_defer_heavy`, journal a `capacity`/`info`/`safe`
+   `diagnostic_deferred` (`target=inventory-security-tools`): first run
+   `bash lib/wm io_pressure_reason`, then set detail to its printed output (no `$(…)`).
+   Skip this pass.
+2. **Scan.** Run `bash lib/wm sectools_scan`. It is read-only — it detects each registry tool, reads its
    live status and the tail of any existing last-run log (never triggering a scan), and emits
    one TSV finding-candidate per row:
    `category \t severity \t risk_tier \t check_id \t target \t title \t detail \t remediation`.
@@ -57,8 +64,9 @@ server-only, via `lib/profile.sh`).
    zero audit rules (`check_id=sectool_health`, `review` tier); and an **absent-defense** row
    per uncovered class (`check_id=defense_gap_*`, `manual` tier). No rows beyond inventory =
    the defenses are present and healthy.
-3. **Journal each record** through `lib/journal.sh` exactly as emitted:
-   `journal_upsert "$family" "$profile" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
+3. **Journal each record** through the dispatcher exactly as emitted (pass `"" ""` for
+   family/profile — `journal_upsert` auto-resolves them):
+   `bash lib/wm journal_upsert "" "" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
    `target` is the tool (inventory/health) or the class (gaps), so a defense that goes
    degraded or a tool that is removed **regresses loudly** on the next run.
 4. **Tiers — never apply.** Inventory rows are `info`/`safe` context. A `sectool_health` row is
@@ -72,6 +80,9 @@ server-only, via `lib/profile.sh`).
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` — the
+dispatcher sources these libs internally; never `source lib/…` directly.
 
 - `lib/sectools.sh` — `sectools_scan` (the registry + observe engine), `sectools_present`
   (present tools for the summary). Knob: `WATCHMAN_FLAG_AV_ABSENT` (flag absent antivirus; off by default).

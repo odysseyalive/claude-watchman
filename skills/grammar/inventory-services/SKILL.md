@@ -27,14 +27,17 @@ depend on knowing which web server or database is present.
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`;
-   resolve `family`/`profile`.
-2. **Web server.** Enumerate EVERY web server present with `webserver_detect` —
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs (`lib/journal.sh`,
+   `lib/distro.sh`, `lib/profile.sh`) under bash internally; never `source lib/…` directly
+   (dontAsk refuses a dot-source). Initialize with `bash lib/wm journal_init`; resolve
+   family/profile via `bash lib/wm watchman_family` / `bash lib/wm watchman_profile`.
+2. **Web server.** Enumerate EVERY web server present with `bash lib/wm webserver_detect` —
    it scans the `/etc` config roots and packages across nginx, apache (apache2 /
    httpd), **Caddy, lighttpd, and OpenLiteSpeed**, so niche/non-default builds are
    not missed. For each, record: its config root, whether the resolved unit is
-   active/enabled (`service_status`/`service_enabled`), and the directories that
-   actually hold its logs via `webserver_log_paths` (parsed from the config —
+   active/enabled (`bash lib/wm service_status` / `bash lib/wm service_enabled`), and the directories that
+   actually hold its logs via `bash lib/wm webserver_log_paths` (parsed from the config —
    custom `access_log`/`CustomLog` targets and per-vhost logs included — never a
    bare `/var/log` assumption). This inventory is what tells inspect-logs and the
    security-header/CORS checks exactly which server, config, and log paths exist.
@@ -74,6 +77,9 @@ depend on knowing which web server or database is present.
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` — the
+dispatcher sources these libs internally; never `source lib/…` directly.
 
 - `lib/distro.sh` — `webserver_detect` / `webserver_config_roots` / `webserver_log_paths`
   (config-derived web-server + log discovery), `service_status`, `service_enabled`, `pkg_is_installed`.

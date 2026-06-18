@@ -26,8 +26,8 @@ read-only — it makes no changes and sends no mail (that is `send-report`).
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh`; `journal_init`.
-2. **Read** the journal through `lib/journal.sh` only (`journal_list`, counts). Group
+1. **Preflight.** Run every claude-watchman function through the dispatcher — `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never `source lib/…` directly (dontAsk refuses a dot-source). Initialize with `bash lib/wm journal_init`.
+2. **Read** the journal through `lib/journal.sh` only (`bash lib/wm journal_list`, counts). Group
    by status: **regressed** first (loudest), then **open** by priority, then a tally
    of **fixed**/**ignored**.
 3. **Explain in plain language.** For each surfaced finding: what it is, why it
@@ -39,6 +39,6 @@ read-only — it makes no changes and sends no mail (that is `send-report`).
 
 ## Grounding
 
-- `lib/journal.sh` — `journal_list`, `journal_count_open`, `journal_count_regressed`, metric reads.
+- `lib/journal.sh` — `journal_list`, `journal_count_open`, `journal_count_regressed`, metric reads (reached via `bash lib/wm <function>`).
 - `prioritize-redflags` — supplies the ordering.
 - `send-report` — wraps this output for email.

@@ -124,6 +124,24 @@ selfcheck_run() {
     else
         _fail "cannot test journal roundtrip — sqlite3 missing"
     fi
+    # Prove the lib/wm dispatcher works — it is the single allowlisted execution path for
+    # every skill (skills call `bash lib/wm <fn>`; dontAsk refuses a bare dot-source). And
+    # prove its read-only guard refuses a mutator when WM_APPLY is unset (the seatbelt that
+    # keeps the loop from mutating). The refusal happens BEFORE the function runs, so this
+    # touches nothing on the system.
+    if [[ -r "$WATCHMAN_ROOT/lib/wm" ]]; then
+        local wmfam
+        wmfam="$(bash "$WATCHMAN_ROOT/lib/wm" watchman_family 2>/dev/null)"
+        [[ -n "$wmfam" && "$wmfam" == "$fam" ]] \
+            && _ok "lib/wm dispatcher OK (bash lib/wm watchman_family → $wmfam)" \
+            || _fail "lib/wm dispatcher FAILED (returned '$wmfam', expected '$fam') — skills cannot execute"
+        local grc=0
+        bash "$WATCHMAN_ROOT/lib/wm" firewall_deny __selfcheck_noop__ >/dev/null 2>&1 || grc=$?
+        (( grc == 3 )) && _ok "lib/wm read-only guard OK (refuses mutators without WM_APPLY)" \
+                        || _fail "lib/wm read-only guard BROKEN (mutator exit $grc, expected refusal 3) — the loop's seatbelt is compromised"
+    else
+        _fail "lib/wm dispatcher missing — skills have no way to call library functions"
+    fi
 
     # --- permissions artifacts --------------------------------------------
     _hdr "5. Permission artifacts"

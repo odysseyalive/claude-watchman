@@ -32,16 +32,23 @@ feeds the `web_cors_policy` / `web_security_headers` severities already declared
 <!-- origin: watchman | version: 1.0 | modifiable: true -->
 ## Workflow
 
-1. **Preflight.** `source lib/journal.sh lib/distro.sh lib/profile.sh`; `journal_init`;
-   resolve `family`/`profile`. These are **server-direction** checks: if
-   `profile_runs_check web_cors_policy` and `profile_runs_check web_security_headers`
+1. **Preflight.** Run every claude-watchman function through the dispatcher —
+   `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
+   `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
+   `bash lib/wm journal_init`. Determine the machine's family and profile by running
+   `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
+   values — you do NOT pass them to journal_upsert (it auto-resolves them; pass `"" ""`).
+   These are **server-direction** checks: if
+   `bash lib/wm profile_runs_check web_cors_policy` and
+   `bash lib/wm profile_runs_check web_security_headers`
    are BOTH false (a workstation), do nothing — the workstation-actually-serving-public
    case is already surfaced by `inventory-services` (which tells the operator to switch
-   to the server profile). Resolve the two base severities once:
-   `sev_cors="$(profile_severity web_cors_policy)"`,
-   `sev_hdr="$(profile_severity web_security_headers)"`.
-2. **Discover the surface.** Use `webserver_detect` (which web servers are present)
-   and `webserver_config_roots` (their `/etc` config roots). No web server → nothing
+   to the server profile). Resolve the two base severities by running
+   `bash lib/wm profile_severity web_cors_policy` and use the printed level as the literal
+   severity for the CORS finding, and `bash lib/wm profile_severity web_security_headers` and use
+   the printed level as the literal severity for the security-header findings.
+2. **Discover the surface.** Use `bash lib/wm webserver_detect` (which web servers are present)
+   and `bash lib/wm webserver_config_roots` (their `/etc` config roots). No web server → nothing
    to index; return.
 3. **Enumerate per-site blocks (config-derived, block-aware).** Read the config files
    under each root with the Read tool and parse them STRUCTURALLY — this is where the
@@ -61,14 +68,16 @@ feeds the `web_cors_policy` / `web_security_headers` severities already declared
      `risk_tier=safe`, `check_id=web_site_index`, `target=<server_name>`; detail names the
      config **file:line**, listen port, and resolved log dirs.
    - **CORS:** if `Access-Control-Allow-Origin` is `*` (most serious when the site is
-     authenticated/credentialed) → `category=security`, `severity=$sev_cors`,
+     authenticated/credentialed) → `category=security`, `severity=<the CORS level printed by
+     bash lib/wm profile_severity web_cors_policy>`,
      `risk_tier=review`, `check_id=web_cors_policy`, `target=<server_name>`; detail quotes
      the value and the **file:line**; remediation = restrict to the explicit allowed
      origins (operator decides which — that is why it is `review`, never auto-applied).
      A site with no CORS header is not itself a finding.
    - **Security headers** — for each of **HSTS** (`Strict-Transport-Security`),
      **X-Frame-Options**, **X-Content-Type-Options**, **Referrer-Policy**: if absent on
-     the site → `category=security`, `severity=$sev_hdr`, `risk_tier=review`,
+     the site → `category=security`, `severity=<the header level printed by
+     bash lib/wm profile_severity web_security_headers>`, `risk_tier=review`,
      `check_id=web_security_headers_<hsts|xfo|xcto|referrer>`, `target=<server_name>`;
      remediation = the exact `add_header` / `Header always set` directive to add, naming
      the file. **Content-Security-Policy** absent → same shape but
@@ -83,6 +92,9 @@ feeds the `web_cors_policy` / `web_security_headers` severities already declared
 <!-- /origin -->
 
 ## Grounding
+
+All claude-watchman functions below are reached via `bash lib/wm <function>` (never a
+direct `source`); the lib files are where they live.
 
 - `lib/distro.sh` — `webserver_detect`, `webserver_config_roots`, `webserver_log_paths`
   (config-derived web-server discovery; the entry point for finding each site's config).

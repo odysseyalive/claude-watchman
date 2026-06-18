@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# lib/wm — the LIB-FUNCTION DISPATCHER. The single allowlisted entrypoint through
+# which every skill calls a claude-watchman shell function.
+#
+# > **PRIME DIRECTIVE (outranks everything below).** Do nothing destructive. If any action
+# > would delete or overwrite a file or directory, modify a database in any way, sever access
+# > (firewall/SSH/auth), or stop/remove a service or package — STOP, WARN the operator in plain
+# > language why it is destructive, and ASK for explicit per-action permission before proceeding.
+# > In the unattended loop there is no one to ask, so the action does not happen: record it and
+# > surface it instead. The only non-destructive database operation is routine create-or-update
+# > through lib/journal.sh. This rule has no exceptions and no mode that overrides it.
+#
+# WHY THIS EXISTS (verified empirically against Claude Code 2.1.181):
+#   1. Claude Code's Bash tool runs commands under the SESSION shell (zsh here), but the
+#      libs are bash (BASH_SOURCE, mapfile, [[ ]]). Invoking `bash lib/wm …` forces bash.
+#   2. Under `defaultMode: dontAsk` the permission layer REFUSES any compound command that
+#      dot-sources a file — even when both the `source` and the function are individually
+#      allowlisted. A skill cannot persist shell state across Bash calls, so it would have
+#      to `source lib/… && fn …` in ONE call — which dontAsk always denies. So the loop
+#      could never run a single lib-driven skill.
+#   3. The fix: this wrapper sources the libs INTERNALLY (invisible to the permission layer)
+#      and dispatches the requested function. ONE allow rule — `Bash(bash lib/wm:*)` — lets
+#      every read/journal skill run, with no per-function allowlist to maintain.
+#
+# THE READ-ONLY SEATBELT (two independent layers, both proven):
+#   * Permission layer: the loop profile grants ONLY `Bash(bash lib/wm:*)`. A mutation must be
+#     requested as `WM_APPLY=1 bash lib/wm <fn> …`, whose leading assignment makes it a DIFFERENT
+#     command prefix that `Bash(bash lib/wm:*)` does NOT match — so under dontAsk it auto-denies.
+#     The unattended loop therefore CANNOT enable mutation, with no operator present.
+#   * This wrapper: even if a mutating function is requested, it is REFUSED unless WM_APPLY=1.
+#     The FIX profile (default mode) grants `Bash(WM_APPLY=1 bash lib/wm <safe-fn>:*)` for the
+#     manifests' safe-tier ops (auto-run) and leaves review-tier ops ungranted, so default mode
+#     PROMPTS for them per finding — the risk-tier confirmation. manual-tier is never granted.
+#
+# Adding a system-mutating function to lib/ means adding it to _WM_MUTATORS below in the SAME
+# change, or the read-only seatbelt silently leaks. (The journal writes through journal.sh are
+# the sanctioned create-or-update of the Prime Directive and are NOT mutators here.)
+
+set -euo pipefail
+
+_WM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$_WM_DIR/.." && pwd)}"
+cd "$WATCHMAN_ROOT"
+
+# System-mutating functions: refused unless WM_APPLY=1 (see the seatbelt note above).
+# Journal writes (journal_upsert/journal_set_status/…) are the sanctioned create-or-update
+# and are deliberately NOT listed.
+_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install "
+
+# Source the observe/analyze/report libs in dependency order: core first (the engines below
+# assume distro.sh/profile.sh are already loaded), then the engines, then the report path.
+# CLI-only libs (preflight/update/uninstall/selfcheck) are intentionally NOT sourced.
+# shellcheck source=/dev/null
+for _lib in journal.sh distro.sh profile.sh io-courtesy.sh \
+            capacity.sh webstats.sh security_currency.sh cpanel.sh sectools.sh shellhist.sh \
+            smtp.sh; do
+    [[ -r "lib/$_lib" ]] && source "lib/$_lib"
+done
+
+fn="${1:-}"; shift || true
+if [[ -z "$fn" ]]; then
+    echo "wm: usage: bash lib/wm <function> [args…]   (mutations: WM_APPLY=1 bash lib/wm <fn> …)" >&2
+    exit 2
+fi
+if [[ "$(type -t "$fn" || true)" != function ]]; then
+    echo "wm: '$fn' is not a claude-watchman library function." >&2
+    exit 2
+fi
+if [[ "$_WM_MUTATORS" == *" $fn "* && "${WM_APPLY:-}" != 1 ]]; then
+    echo "wm: refusing system-mutating function '$fn' — the read-only dispatcher applies nothing." >&2
+    echo "wm: remediation runs in the FIX profile (watchman fix), which gates each change per the risk tier." >&2
+    exit 3
+fi
+
+"$fn" "$@"
