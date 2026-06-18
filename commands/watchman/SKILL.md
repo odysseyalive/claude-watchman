@@ -28,6 +28,19 @@ claude-watchman repo root (paths below are relative to it). Journal every findin
 through `lib/journal.sh` — never touch `findings.db` directly. If no verb is given, list
 the verbs and stop.
 
+**Shell-CLI verbs are not handled here — redirect, don't run.** `selfcheck`, `preflight`,
+and `update` are the zero-token, bash-only half of claude-watchman; they live in the
+`watchman` shell CLI on purpose (no Claude, no tokens). If the argument is one of these,
+do **not** read files or improvise — print this one-liner and stop, mirroring the shell's
+own redirect of the AI verbs:
+
+> `<verb>` is a zero-token shell command — run **`watchman <verb>`** in your shell, not
+> here. (`selfcheck` = plumbing check, `preflight` = regenerate the allowlist + this
+> command, `update` = re-fetch the latest product.) The in-session verbs are: audit,
+> report, loop, fix, inventory, stats.
+
+For any other unrecognized argument, list the in-session verbs and stop.
+
 ---
 
 ## audit — Observe + Analyze (no fixes)
