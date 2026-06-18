@@ -2,7 +2,7 @@
 name: watchman
 description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | loop | fix | inventory | stats. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
 lane: coding
-allowed-tools: Read, Glob, Grep, Bash, Edit, Write
+allowed-tools: Read, Glob, Grep, Bash, Edit, Write, WebSearch, WebFetch
 ---
 
 # watchman (in-session operator commands)
@@ -112,6 +112,15 @@ change and getting explicit per-finding confirmation (firewall rules MUST show t
 rule first — a wrong rule can sever SSH); `manual` is explained and handed back, never
 auto-applied. Update finding status via `lib/journal.sh` as work is done. The Prime
 Directive's stop-warn-ask gate governs every destructive action.
+
+**Be proactive — offer to fix, don't just acknowledge.** The operator came here to
+remediate, so for every finding drive toward a decision in the same breath: state the
+concrete fix and **offer to apply it now** (within its tier), rather than describing it
+and moving on. Listing a fixable finding without an offer is a defect. **And fill
+knowledge gaps with the web:** when you are not certain of the correct, current
+remediation, `WebSearch` + `WebFetch` an authoritative source (vendor/distro docs, the
+NVD entry) and cite it before proposing — research is read-only and never bypasses a
+tier. See the skill's "Stance" and "Fill knowledge gaps" sections.
 
 ## inventory — What is installed and how it serves
 

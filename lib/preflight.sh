@@ -400,7 +400,12 @@ preflight_write_fix_settings() {
     local claude_dir="$1" target="$1/settings.fix.json"
     mkdir -p "$claude_dir"
     local allow dirs deny
-    allow="$(cat "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.fix.allow" 2>/dev/null | awk 'NF' | sort -u)"
+    # The FIX profile also grants the web-research tools so fix-redflag can fill a
+    # knowledge gap (verify a remediation against vendor/distro docs / NVD) with no
+    # prompt friction. Read-only and never bypasses a tier — proposing is not applying.
+    # Deliberately NOT in the loop's read-only allowlist (.pf.allow): the unattended
+    # loop has no operator and no remediation to research.
+    allow="$( { cat "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.fix.allow" 2>/dev/null; printf 'WebSearch\nWebFetch\n'; } | awk 'NF' | sort -u)"
     dirs="$(cat "$WATCHMAN_ROOT/.pf.dirs"  "$WATCHMAN_ROOT/.pf.fix.dirs"  2>/dev/null | awk 'NF' | sort -u)"
     deny="$(_pf_deny_base)"
     jq -n --arg allow "$allow" --arg dirs "$dirs" --arg deny "$deny" '
