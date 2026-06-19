@@ -113,14 +113,17 @@ rule first — a wrong rule can sever SSH); `manual` is explained and handed bac
 auto-applied. Update finding status via `lib/journal.sh` as work is done. The Prime
 Directive's stop-warn-ask gate governs every destructive action.
 
-**Be proactive — offer to fix, don't just acknowledge.** The operator came here to
-remediate, so for every finding drive toward a decision in the same breath: state the
-concrete fix and **offer to apply it now** (within its tier), rather than describing it
-and moving on. Listing a fixable finding without an offer is a defect. **And fill
-knowledge gaps with the web:** when you are not certain of the correct, current
-remediation, `WebSearch` + `WebFetch` an authoritative source (vendor/distro docs, the
-NVD entry) and cite it before proposing — research is read-only and never bypasses a
-tier. See the skill's "Stance" and "Fill knowledge gaps" sections.
+**Be proactive — open with a plan, prepare every change, don't just acknowledge.** The
+operator came here to remediate. So *first* pull the prioritized `open`+`regressed`
+worklist and present it as a numbered remediation plan. Then for **every** finding
+prepare the exact change up front — the config line, the diff, the firewall rule, the
+drafted policy — so their only decision is yes/no, never "go write the fix yourself."
+Batch the `safe` tier into one "apply all N?" prompt where the profile permits; show
+the exact change before any `review` apply; hand `manual` back as a drafted,
+ready-to-paste artifact, not advice. Handing a fixable finding back as advice instead
+of a staged change is a defect. **Fill knowledge gaps with the web** before proposing
+(`WebSearch` + `WebFetch` an authoritative source, cite it) — research is read-only and
+never bypasses a tier. See the skill's "Stance" and "Fill knowledge gaps" sections.
 
 ## inventory — What is installed and how it serves
 

@@ -49,28 +49,47 @@ For every finding, behavior is bounded by its `risk_tier` — never widened:
   too context-specific to generate safely (a Content-Security-Policy is the canonical
   example). Flag it, explain it, hand it back.
 
-## Stance: actively offer to fix — never just acknowledge and move on
+## Stance: proactive — open with a plan, prepare every change, drive each to a decision
 
-The operator launched this session to *fix things*, not to re-hear the audit. For
-**every** finding you surface, drive it toward a decision in the same breath: state
-the concrete remediation, then **offer to apply it now** (within its tier's rules)
-and ask for the go-ahead. Do not list a finding, explain it, and slide to the next
-one — that is the failure mode this stance exists to kill. Make the easy path the
-fixing path:
+The operator launched this session to *fix things*, not to re-hear the audit. Being
+proactive here is concrete and has three obligations, in order:
 
-- **`safe`** — propose it as "I can apply this now — OK?" and apply on a yes. Where
-  the profile permits batching, offer the batch in one prompt ("I can apply these N
-  safe fixes — apply all?") rather than re-asking per item.
-- **`review`** — proactively offer, but always show the **exact** change first and
-  get a per-finding yes. Offering is not applying: a wrong firewall rule can sever
-  SSH, so the offer leads with the exact rule and waits.
-- **`manual`** — you still cannot apply it, but be proactive in *teaching* the fix:
-  give the operator the specific steps/snippet they need (researched, see below),
-  not a generic "this is too context-specific." Hand back something actionable.
+1. **Open with a remediation plan — don't wait to be asked.** The first thing you do
+   is pull the prioritized `open` + `regressed` worklist from the journal yourself
+   and present it as a numbered plan: each finding, its `risk_tier`, and the prepared
+   remediation. The operator should not have to ask "what's wrong" or pick findings
+   out of a hat — that was the audit's job; your job is to arrive already holding the
+   actionable list.
+2. **Prepare the exact change for EVERY finding before you ask — every tier.** The
+   single biggest proactivity failure is handing a finding back as advice ("durable
+   fix: key-only SSH", "add a Content-Security-Policy") instead of as a *ready
+   change*. Do the work first: write the exact config line, the exact diff, the exact
+   firewall rule, the drafted starter policy — so the operator's only remaining
+   decision is **yes/no**, never "now you go figure out the fix." Preparing a change
+   is read-only and is NOT applying it; it never bypasses a tier.
+3. **Drive each toward a decision in the same breath.** State the prepared remediation,
+   then offer it within its tier's rules and ask for the go-ahead. Do not list a
+   finding, explain it, and slide to the next one.
 
-The only finding you leave without an offer is one the operator has already told you
-to skip (`ignored`/`in-review`), or one a tier forbids. Silence on a fixable finding
-is a defect of this skill.
+Make the easy path the fixing path, per tier:
+
+- **`safe`** — apply on a simple yes. Where the profile permits batching
+  (`profile_allows_safe_batch`), lead with the batch: present all N prepared safe
+  changes and offer "apply all N now?" in **one** prompt. A pile of safe toggles
+  should cost the operator one decision, not N.
+- **`review`** — proactively prepare and **show the exact change first** (the precise
+  config diff / firewall rule), then get a per-finding yes. Offering is not applying:
+  a wrong firewall rule can sever SSH, so the offer leads with the exact rule and
+  waits.
+- **`manual`** — you still cannot apply it, but proactivity means handing back a
+  *drafted, ready-to-paste* fix, not a lecture. Write the concrete starter artifact
+  (e.g. an actual `Content-Security-Policy` header line scoped to what the site
+  serves, researched per "Fill knowledge gaps"), show exactly where it goes, and set
+  status `in-review`. The operator pastes and tunes — they do not start from zero.
+
+The only finding you leave without a prepared change and an offer is one the operator
+has already told you to skip (`ignored`/`in-review`). Silence on a fixable finding —
+or handing one back as advice instead of a staged change — is a defect of this skill.
 
 ## Fill knowledge gaps with the web before you propose
 
@@ -99,9 +118,11 @@ forum hearsay, and prefer current pages over stale ones. Then:
    go through `WM_APPLY=1 bash lib/wm <fn>` so the dispatcher permits them and the FIX
    profile gates them per risk tier; every read and every journal write uses the **plain**
    `bash lib/wm <fn>` form.
-2. **Select** the finding(s) to address from the journal (operator chooses, or work
-   the prioritized list). Work the list to completion — for each finding, make a
-   concrete fix offer; do not stop at describing it.
+2. **Open with the plan.** Pull the prioritized `open` + `regressed` worklist from the
+   journal yourself and present it as a numbered remediation plan (finding, `risk_tier`,
+   prepared change) before asking the operator anything — don't wait to be told what to
+   fix. Then work the list to completion: for each finding, prepare the exact change and
+   make a concrete offer; do not stop at describing it.
 3. **Research any gap (read-only).** If you are not certain of the correct, current
    remediation, `WebSearch` + `WebFetch` an authoritative source before proposing
    (see "Fill knowledge gaps" above). Cite what you relied on.
@@ -110,8 +131,9 @@ forum hearsay, and prefer current pages over stale ones. Then:
    `review`, show the exact diff/command, offer it, get a yes for THIS finding, then
    apply via the resolver (`WM_APPLY=1 bash lib/wm firewall_allow`/`WM_APPLY=1 bash lib/wm
    firewall_deny` show and confirm the exact rule; config edits via Edit). For `manual`,
-   set status `in-review` and hand back the specific, researched steps — do not change the
-   system.
+   set status `in-review` and hand back a **drafted, ready-to-paste artifact** (the actual
+   header line, config snippet, or command, researched and scoped to this host) plus where
+   it goes — not generic advice — and do not change the system.
 5. **Prime-Directive preflight before EVERY mutating step.** If the action would
    delete/overwrite a file, modify a database, sever access, or stop/remove a
    service/package → STOP, WARN in plain language, ASK. Proceed only on explicit
