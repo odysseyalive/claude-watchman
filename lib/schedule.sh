@@ -120,12 +120,18 @@ _sched_default_mech() {
 }
 
 # Confirm prompt, default No — reads the operator's TTY even when stdin is piped.
+# The prompt is printed explicitly (NOT via read -p): read writes its -p prompt to
+# stderr, so redirecting the read's stderr to /dev/null — needed to swallow a tty
+# error — would also swallow the prompt, leaving the operator staring at a blank
+# hang. Print the prompt to a visible stream first, then read silently.
 _sched_confirm() {
     local prompt="$1" ans=""
     if [[ -r /dev/tty ]]; then
-        read -r -p "$prompt [y/N] " ans </dev/tty 2>/dev/null || ans=""
+        printf '%s [y/N] ' "$prompt" >/dev/tty
+        read -r ans </dev/tty 2>/dev/null || ans=""
     else
-        read -r -p "$prompt [y/N] " ans || ans=""
+        printf '%s [y/N] ' "$prompt" >&2
+        read -r ans || ans=""
     fi
     [[ "$ans" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
