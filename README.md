@@ -11,8 +11,7 @@
 
 claude-watchman is a set of Claude Code skills that run one loop: look at the machine,
 write down what's wrong, help you fix it. It only reaches out when the picture changes.
-It runs on Debian/Ubuntu, RHEL-family, and Arch, and adapts to whether the box is a
-public **server** or a personal **workstation**.
+It runs on Debian/Ubuntu, RHEL-family, Arch, and macOS, and adapts to whether the box is a public **server** or a personal **workstation**.
 
 It drives proven tools (Lynis, CrowdSec, journald, your distro's own integrity
 verifier) and layers on a durable journal, plain-language explanations, and the
@@ -50,10 +49,7 @@ Use the `bash -c "$(...)"` form so the prompts keep your terminal:
 mkdir watchman && cd watchman && bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
 ```
 
-Run it as root. It detects your distro and profile, installs dependencies, sets up the
-journal and config, and generates the Claude permission allowlist. Every privileged
-step asks first. There's no service user to create — claude-watchman runs as root and
-reads your logs directly. **The same command installs and updates** — see Updating.
+Run it as root on Linux. On macOS, run it as your normal user — root is not recommended; macOS Unified Log access requires **Full Disk Access** granted to your terminal in System Settings > Privacy & Security, not root privileges. It detects your platform and profile, installs dependencies, sets up the journal and config, and generates the Claude permission allowlist. Every privileged step asks first. **The same command installs and updates** — see Updating.
 
 ## Quick start
 
@@ -66,8 +62,7 @@ watchman selfcheck
 
 **2. Launch Claude Code — this is its own step.** The `audit`, `report`, `fix`,
 `inventory`, and `stats` features are AI-driven, so they run *inside* a Claude Code
-session (where you watch the work and the token meter), **not** from the shell. Open a
-session, as root:
+session (where you watch the work and the token meter), **not** from the shell. Open a session (as root on Linux; as your normal user on macOS):
 
 ```bash
 claude
@@ -101,8 +96,7 @@ stays visible. Start a persistent session:
 tmux new -s watchman
 ```
 
-Inside it, launch Claude as root (`claude`, run `/login` once), then start the recurring
-pass:
+Inside it, launch Claude (`claude`, run `/login` once — as root on Linux, as your normal user on macOS), then start the recurring pass:
 
 ```
 /loop 30m /watchman loop
@@ -181,12 +175,9 @@ firewall rule or SSH config without showing the rule first.
 
 ## Running it
 
-Run claude-watchman as **root** — it reads every log and journal directly, so there's
-no service user and no sudoers to manage. Auth is Claude Code's own login; there are no
-API keys. The AI verbs run in-session on purpose: Claude Code spends tokens on every
-pass, and you should be able to see that happening — never a silent background daemon.
+**Linux:** run claude-watchman as **root** — it reads every log and journal directly, so there's no service user and no sudoers to manage. **macOS:** run as your normal user; grant your terminal emulator Full Disk Access in System Settings > Privacy & Security so the Unified Log is readable. Auth is Claude Code's own login; there are no API keys. The AI verbs run in-session on purpose: Claude Code spends tokens on every pass, and you should be able to see that happening — never a silent background daemon.
 
-**One-off checks** — launch a session as root:
+**One-off checks** — launch a session (as root on Linux, as your normal user on macOS):
 
 ```bash
 claude
@@ -202,7 +193,7 @@ session:
 tmux new -s watchman
 ```
 
-Inside it, launch Claude as root (`claude`, run `/login` once), then start the loop:
+Inside it, launch Claude (`claude`, run `/login` once — as root on Linux, as your normal user on macOS), then start the loop:
 
 ```
 /loop 30m /watchman loop
@@ -271,16 +262,21 @@ Run it on demand — it is deliberately **not** part of the monitoring loop:
 /watchman stats
 ```
 
-## Distro support
+## Platform support
 
-Skills stay distro-blind; one resolver knows the differences.
+Skills stay platform-blind; one resolver knows the differences.
 
-| | Debian / Ubuntu | RHEL family | Arch |
-|---|---|---|---|
-| Packages | apt / dpkg | dnf / rpm | pacman |
-| Firewall | ufw | firewalld | nftables / ufw |
-| MAC | AppArmor | SELinux | (none by default) |
-| Integrity | debsums | rpm -V | pacman -Qkk |
+| | Debian / Ubuntu | RHEL family | Arch | macOS |
+|---|---|---|---|---|
+| Packages | apt / dpkg | dnf / rpm | pacman | Homebrew |
+| Services | systemctl | systemctl | systemctl | brew services / launchctl |
+| Firewall | ufw | firewalld | nftables / ufw | pf |
+| MAC / sandboxing | AppArmor | SELinux | (none by default) | SIP (csrutil) |
+| Integrity | debsums | rpm -V | pacman -Qkk | codesign + SIP |
+| CVE scan | yes | yes | yes | — (no Homebrew CVE DB) |
+| Run as | root | root | root | normal user + Full Disk Access |
+
+> **macOS note:** The vulnerability scanner step in `check-security-currency` is skipped on macOS — there is no CVE database for Homebrew packages. All other security-currency checks (pending updates, signature/threat-intel freshness, auto-update status) run normally.
 
 ## Updating
 
