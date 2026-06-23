@@ -25,6 +25,7 @@ lib/cpanel.sh
 lib/distro.sh
 lib/io-courtesy.sh
 lib/journal.sh
+lib/monitor.sh
 lib/preflight.sh
 lib/profile.sh
 lib/schedule.sh
@@ -36,7 +37,7 @@ lib/smtp.sh
 lib/uninstall.sh
 lib/update.sh
 lib/webstats.sh
-hook lib/wm
+lib/wm
 README.md
 skills/grammar/audit-system/manifest.json
 skills/grammar/audit-system/SKILL.md

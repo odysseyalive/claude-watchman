@@ -1,6 +1,6 @@
 ---
 name: watchman
-description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | loop | fix | inventory | stats. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
+description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | loop | monitor | fix | inventory | stats. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, WebSearch, WebFetch
 ---
@@ -8,7 +8,7 @@ allowed-tools: Read, Glob, Grep, Bash, Edit, Write, WebSearch, WebFetch
 # watchman (in-session operator commands)
 
 This is the AI-augmented half of claude-watchman. The token-spending operations —
-**audit, report, loop, fix, inventory** — run here, inside a visible Claude Code
+**audit, report, loop, monitor, fix, inventory** — run here, inside a visible Claude Code
 session, so you always see what they do and what they spend. (The zero-token plumbing,
 `selfcheck` and `preflight`, stays in the `watchman` shell CLI — do not run it here.)
 
@@ -23,7 +23,8 @@ session, so you always see what they do and what they spend. (The zero-token plu
 ## How to invoke
 
 The verb arrives as this skill's argument: `/watchman audit`, `/watchman report`,
-`/watchman loop`, `/watchman fix`, `/watchman inventory`, `/watchman stats`. Run from the
+`/watchman loop`, `/watchman monitor`, `/watchman fix`, `/watchman inventory`,
+`/watchman stats`. Run from the
 claude-watchman repo root (paths below are relative to it). Journal every finding **only**
 through `lib/journal.sh` — never touch `findings.db` directly. If no verb is given, list
 the verbs and stop.
@@ -39,7 +40,7 @@ verbs:
 > `<verb>` is a zero-token shell command — run **`watchman <verb>`** in your shell, not
 > here. (`selfcheck` = plumbing check, `preflight` = regenerate the allowlist + this
 > command, `update` = re-fetch the latest product, `uninstall` = remove claude-watchman.)
-> The in-session verbs are: audit, report, loop, fix, inventory, stats.
+> The in-session verbs are: audit, report, loop, monitor, fix, inventory, stats.
 
 For any other unrecognized argument, list the in-session verbs and stop.
 
@@ -88,6 +89,72 @@ only through `lib/journal.sh`. Make no changes.
 This pass is OBSERVE + REPORT ONLY — never apply a fix. (For unattended cadence, the
 operator drives this with Claude Code's `/loop 6h /watchman loop` inside a tmux session
 they can re-attach to.)
+
+## monitor — Attended, announce-only watch of a single concern
+
+`monitor` is the **inverse of `loop`**: where `loop` is a heavyweight whole-machine
+journaling pass on a long cadence, `monitor` is a lightweight, single-concern, **ephemeral**
+watch the operator runs *while they work*. The operator states — in plain words — what to
+keep an eye on, and each pass announces only what is **new** since the last pass, giving
+them a chance to react in real time. The canonical case: *"watch the Apache logs for CORS
+preflight rejections while I tune `Access-Control-Allow-Origin`."*
+
+**The argument is a freeform focus**, e.g. `/watchman monitor "watch the nginx error log
+for CSP report-uri hits"` or `/watchman monitor "watch /var/log/myapp.log for stack
+traces"`. If no focus is given, explain the verb and stop.
+
+**How the operator drives it — their own `/loop`, in their own session.** monitor is one
+pass; the operator makes it recurring by running it under Claude Code's `/loop` in the
+session they are already working in:
+
+```
+/loop 1m /watchman monitor "watch the apache error log for CORS preflight 403s"
+```
+
+A 1–2 minute interval feels near-live during active testing. The watch lives and dies with
+that `/loop` — stop the loop (or close the session) and monitoring ends. This is the
+explicitly **attended** counterpart to the headless `watchman run`: there is **no email,
+no OS trigger, and no journal write** — monitor only announces, in-session, where the
+operator can see it.
+
+**This runs in the operator's normal session, NOT the loop's `dontAsk` profile.** Because
+the operator chooses what to watch, monitor needs to read arbitrary files and run arbitrary
+**read-only** commands — which the read-only loop allowlist deliberately does not grant. So
+monitor relies on the operator being present: the first time a pass reads a new file or runs
+a new command, Claude Code prompts, the operator approves, and the approval is remembered for
+the rest of the session. Do **not** try to widen any allowlist to silence those prompts.
+
+**Each pass — decide a read-only probe, emit only the delta, interpret, announce:**
+
+1. From the focus, work out *what to read*. Resolve real paths through the library when the
+   concern is web/server-shaped (e.g. `bash lib/wm webserver_log_paths`,
+   `bash lib/wm log_path_auth`) rather than guessing; otherwise use the explicit path the
+   operator named.
+2. Read **only what is new since the last pass**, via one of two deterministic helpers, so
+   you never re-announce content already shown:
+   - **File watch** → `bash lib/wm monitor_file_delta <path…>` — emits only the bytes
+     appended since the previous pass (own offsets in `journal/monitor-offsets.txt`;
+     rotation and truncation handled).
+   - **Command watch** (a snapshot with no byte offset — open connections, a `grep` result
+     set) → run the read-only command **yourself** (so the permission layer sees and gates
+     the real command, e.g. `ss -tnp`, `journalctl -u … --since …`) and pipe it through
+     `bash lib/wm monitor_diff <key>` — which prints only the lines new since the prior
+     snapshot and saves the new baseline under `journal/monitor-state/<key>`. Use a stable
+     `<key>` per watch (e.g. `cors-403`) so its baseline persists across passes.
+   The **first** pass has no baseline, so it announces the current state — that establishes
+   the baseline; subsequent passes announce only changes.
+3. Interpret the new lines against the focus and **announce in plain language** — what
+   appeared, why it matters, and the adjustment it points to (e.g. *"3 preflight `OPTIONS
+   /api` got 403 in the last minute — your `Access-Control-Allow-Origin` doesn't list
+   `https://staging.example.com`."*). If nothing new matches, say so briefly (one line) and
+   end the pass — a quiet watch is a quiet pass.
+
+**Read-only, by the Prime Directive.** monitor observes; it never fixes. **Never use a
+mutating command as a watch probe** — no `rm`, no redirection that truncates a file, nothing
+that changes service or firewall state. If the operator's focus can only be satisfied by a
+mutating action, STOP and surface that instead of doing it. The two helpers above write only
+their own gitignored scratch state (offsets and snapshot baselines), which is the sanctioned
+advisory-state category — not a system change and not a journal database write.
 
 ## fix — Interactive remediation, bounded by risk tier
 

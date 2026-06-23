@@ -56,7 +56,7 @@ _WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_i
 # shellcheck source=/dev/null
 for _lib in journal.sh distro.sh profile.sh io-courtesy.sh \
             capacity.sh webstats.sh security_currency.sh cpanel.sh sectools.sh shellhist.sh \
-            smtp.sh schedule.sh; do
+            monitor.sh smtp.sh schedule.sh; do
     [[ -r "lib/$_lib" ]] && source "lib/$_lib"
 done
 

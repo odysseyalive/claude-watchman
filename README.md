@@ -231,6 +231,7 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `/watchman audit` | Observe + analyze, journal findings. No fixes. |
 | `/watchman report` | Plain-language summary of the journal. |
 | `/watchman loop` | One pass: observe → journal → delta → email if it matters. |
+| `/watchman monitor "<focus>"` | Attended, announce-only watch of one concern you state in words. Run it under your own `/loop` while you work; it reports new activity in-session and writes nothing to the journal. See below. |
 | `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. Don't type this one in a normal session — launch it from the shell with `watchman fix`, which opens the FIX profile and runs it for you (a plain session can't apply fixes; see below). |
 | `/watchman inventory` | What's installed and how it serves. |
 | `/watchman stats` | Privacy-respecting web traffic analytics from access logs. On demand, not the loop. |
@@ -259,6 +260,26 @@ watchman safe
 
 Then, inside the session, run `/watchman audit` and `/watchman report`. (Or skip straight
 to one with `watchman audit` / `watchman report`, which open a session already running it.)
+
+### Watch while you work
+
+`monitor` is the inverse of the recurring loop below: a lightweight, **announce-only** watch
+of a single thing you state in plain words, meant to run *while you change something* so you
+see the effect immediately. The classic case is tuning CORS or a Content-Security-Policy and
+watching the web server's logs for rejections as you go. It writes nothing to the journal and
+sends no email — it just tells you, in-session, what's new.
+
+You make it recurring with Claude Code's own `/loop`, in the session you're already working
+in. State the focus in words and pick a short interval:
+
+```
+/loop 1m /watchman monitor "watch the apache error log for CORS preflight 403s"
+```
+
+Each tick reports only what appeared since the last one and points at the adjustment to make.
+Stop the loop (or close the session) and the watch ends — it lives only as long as you're
+there to act on it. The first time a pass reads a new file or runs a new command, Claude Code
+asks your approval, then remembers it for the session.
 
 ### Recurring monitoring
 

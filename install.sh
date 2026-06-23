@@ -284,6 +284,8 @@ journal/findings.db-wal
 journal/findings.db-shm
 journal/network-baseline.txt
 journal/log-offsets.txt
+journal/monitor-offsets.txt
+journal/monitor-state/
 journal/run-ledger.tsv
 journal/run.log
 journal/.write.lock
