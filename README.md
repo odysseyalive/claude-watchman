@@ -241,6 +241,7 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `watchman safe` | **Launcher** (spends nothing itself): opens a Claude session in the watchman directory under the default read-only profile — the easy way to start Claude in the same context. Observe only; it can apply nothing. |
 | `watchman audit` | **Launcher**: opens a read-only session (default profile) already running `/watchman audit`. |
 | `watchman report` | **Launcher**: opens a read-only session (default profile) already running `/watchman report`. |
+| `watchman status` | **Launcher**: opens a read-only session (default profile) already running `/watchman status` — a plain-language report of the last monitoring run, written for a non-technical reader. |
 | `watchman fix` | **Launcher** (spends nothing itself): opens a Claude session in the FIX profile and **auto-runs the fixer for you** — you don't type anything, you just confirm each change. |
 | `watchman dev` | **Launcher** for maintainers: opens a session in the DEV profile (repo-write, `acceptEdits`) for editing the source. |
 | `watchman schedule` | Install / remove / inspect the headless monitoring trigger (systemd timer or cron) for indefinite, unattended monitoring. `install [--every 6h] [--cron\|--systemd]`, `remove`, `status`. Install/remove are operator-confirmed system changes. |
@@ -252,6 +253,7 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 |---------|--------------|
 | `/watchman audit` | Observe + analyze, journal findings. No fixes. |
 | `/watchman report` | Plain-language summary of the journal. |
+| `/watchman status` | Plain-language report of the **last run** — when it ran, what happened, and any important issues explained for a non-technical reader. Read-only, on demand. |
 | `/watchman loop` | One pass: observe → journal → delta → email if it matters. |
 | `/watchman monitor "<focus>"` | Attended live watch of one concern you state in words. Run it under your own `/loop` while you work; what it can do is set by the session you launch it in — observe-only under `watchman safe`, watch-and-fix (per-change confirmation) under `watchman fix`. See below. |
 | `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. Don't type this one in a normal session — launch it from the shell with `watchman fix`, which opens the FIX profile and runs it for you (a plain session can't apply fixes; see below). |

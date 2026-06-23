@@ -13,6 +13,8 @@
 #   watchman safe        LAUNCH a read-only session under the DEFAULT profile (same as `claude` here).
 #   watchman audit       LAUNCH a read-only session under the DEFAULT profile, running /watchman audit.
 #   watchman report      LAUNCH a read-only session under the DEFAULT profile, running /watchman report.
+#   watchman status      LAUNCH a read-only session under the DEFAULT profile, running /watchman status
+#                        (plain-language report of the last run for a non-technical reader).
 #   watchman fix         LAUNCH a remediation session in the FIX profile (default mode).
 #   watchman dev         LAUNCH a maintainer session in the DEV profile (acceptEdits).
 #   watchman run         Run ONE headless loop pass (for cron/systemd) + log its token cost.
@@ -87,6 +89,10 @@ permission mode is fixed at session startup and cannot be changed from inside):
                        running /watchman audit (observe + analyze, journal findings, no fixes).
   watchman report      Like `safe`, under the DEFAULT read-only profile, but opens already
                        running /watchman report (human-readable summary of the journal).
+  watchman status      Like `safe`, under the DEFAULT read-only profile, but opens already
+                       running /watchman status — a plain-language report of the last
+                       monitoring run (when it ran, what happened, and anything important
+                       to know), written so a non-technical reader can follow it.
   watchman fix         LAUNCH a remediation session — FIX profile, "default" mode: every
                        fix prompts per finding (the risk-tier confirmation), safe toggles
                        are pre-approved, the destructive deny base is retained. The session
@@ -323,6 +329,14 @@ EOF
         _launch_default_session \
             "report session under the default read-only profile (journal summary; read-only)." \
             "Run /watchman report" ;;
+
+    status)
+        # Plain-language report of the last monitoring run for a non-technical reader —
+        # when it ran, what happened, and any important issues to expand on. Opens a
+        # session under the DEFAULT read-only profile already running /watchman status.
+        _launch_default_session \
+            "status session under the default read-only profile (plain-language report of the last run; read-only)." \
+            "Run /watchman status" ;;
 
     fix)
         # Operator-run remediation. Needs the FIX profile: "default" mode (per-finding

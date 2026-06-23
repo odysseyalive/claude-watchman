@@ -299,3 +299,27 @@ journal_get() {
     local fp; fp="$(_sql_escape "$1")"
     _journal_sqlite "SELECT id,fingerprint,severity,risk_tier,status,category,title,detail,remediation FROM findings WHERE fingerprint='$fp';"
 }
+# Read-only: the last N runs (newest first), so report-lastrun can lead with WHEN the
+# cycle last ran and WHAT changed. correlate-findings writes one row per loop pass with a
+# plain-language `summary` (counts of new/regressed/cleared) — that summary IS the
+# per-run account. Pipe-separated: id|kind|started_at|finished_at|summary. Default N=5.
+journal_recent_runs() {
+    local n="${1:-5}"
+    [[ "$n" =~ ^[0-9]+$ ]] || n=5
+    _journal_sqlite "SELECT id,kind,started_at,COALESCE(finished_at,''),summary FROM runs ORDER BY started_at DESC LIMIT $n;"
+}
+# Read-only: the open/regressed findings worth EXPLAINING to a non-technical operator —
+# everything regressed (came back), plus high/critical severity — WITH detail and
+# remediation (journal_list omits those). Regressed first, then by severity. This is what
+# report-lastrun expands on after the brief overview. Pipe-separated:
+# id|severity|risk_tier|status|category|title|detail|remediation.
+journal_important_open() {
+    _journal_sqlite "SELECT id,severity,risk_tier,status,category,title,detail,remediation
+FROM findings
+WHERE status IN ('open','regressed')
+  AND (status='regressed' OR severity IN ('high','critical'))
+ORDER BY
+  CASE status WHEN 'regressed' THEN 0 ELSE 1 END,
+  CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+  last_seen_at DESC;"
+}

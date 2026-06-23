@@ -1,6 +1,6 @@
 ---
 name: watchman
-description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | loop | monitor | fix | inventory | stats. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
+description: "claude-watchman operator commands — run IN a Claude Code session so token use is visible. Modes: audit | report | status | loop | monitor | fix | inventory | stats. (selfcheck and preflight are zero-token bash — run those with the `watchman` shell CLI, not here.)"
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, WebSearch, WebFetch
 ---
@@ -23,8 +23,8 @@ session, so you always see what they do and what they spend. (The zero-token plu
 ## How to invoke
 
 The verb arrives as this skill's argument: `/watchman audit`, `/watchman report`,
-`/watchman loop`, `/watchman monitor`, `/watchman fix`, `/watchman inventory`,
-`/watchman stats`. Run from the
+`/watchman status`, `/watchman loop`, `/watchman monitor`, `/watchman fix`,
+`/watchman inventory`, `/watchman stats`. Run from the
 claude-watchman repo root (paths below are relative to it). Journal every finding **only**
 through `lib/journal.sh` — never touch `findings.db` directly. If no verb is given, list
 the verbs and stop.
@@ -40,7 +40,7 @@ verbs:
 > `<verb>` is a zero-token shell command — run **`watchman <verb>`** in your shell, not
 > here. (`selfcheck` = plumbing check, `preflight` = regenerate the allowlist + this
 > command, `update` = re-fetch the latest product, `uninstall` = remove claude-watchman.)
-> The in-session verbs are: audit, report, loop, monitor, fix, inventory, stats.
+> The in-session verbs are: audit, report, status, loop, monitor, fix, inventory, stats.
 
 For any other unrecognized argument, list the in-session verbs and stop.
 
@@ -76,6 +76,17 @@ the permissions, and trying will only hit dead-end denials.
 Execute `skills/rhetoric/report-status/SKILL.md` exactly: produce a human-readable
 summary of the current journal state (`open`, `regressed`, `fixed`, `ignored`), reading
 only through `lib/journal.sh`. Make no changes.
+
+## status — Plain-language report of the last run, for a non-technical reader
+
+Execute `skills/rhetoric/report-lastrun/SKILL.md` exactly: lead with **when** the
+watchman last checked the machine and a brief plain-language overview of what happened
+that run (from the `runs` table's per-pass `summary`), then **expand on any important
+issues and warnings** so a non-technical reader understands what needs attention, with a
+short recent-run trend. Read only through `lib/journal.sh` (and `schedule_ledger_summary`
+for headless-run recency), all via `bash lib/wm`. This is the gentler counterpart to
+`report` — it answers "is anything wrong, and what should I do?" Make no changes; send no
+mail. (`watchman status` from the shell opens a read-only session already running this.)
 
 ## loop — ONE pass: observe → journal → delta → conditional report
 
