@@ -14,7 +14,7 @@ write down what's wrong, help you fix it. It only reaches out when the picture c
 It runs on Debian/Ubuntu, RHEL-family, Arch, and macOS, and adapts to whether the box is a
 public **server** or a personal **workstation**.
 
-It drives proven tools (Lynis, CrowdSec, journald, your distro's own integrity
+It drives proven tools (Lynis, CrowdSec, journald, your platform's own integrity
 verifier) and layers on a durable journal, plain-language explanations, and the
 judgment to tell a new problem from old news.
 
@@ -54,7 +54,7 @@ Use the `bash -c "$(...)"` form so the prompts keep your terminal:
 cd /root && mkdir watchman && cd watchman && bash -c "$(curl -fsSL https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.sh)"
 ```
 
-That puts watchman at `/root/watchman`. It detects your distro and profile, installs
+That puts watchman at `/root/watchman`. It detects your platform and profile, installs
 dependencies, sets up the journal and config, and generates the Claude permission
 allowlist. Every privileged step asks first. There's no service user to create;
 claude-watchman runs as root and reads your logs directly. **The same command installs
