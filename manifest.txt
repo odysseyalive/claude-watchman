@@ -31,6 +31,7 @@ lib/journal.sh
 lib/monitor.sh
 lib/preflight.sh
 lib/profile.sh
+lib/retention.sh
 lib/schedule.sh
 lib/sectools.sh
 lib/security_currency.sh
@@ -49,6 +50,7 @@ lib/journal.ps1
 lib/monitor.ps1
 lib/preflight.ps1
 lib/profile.ps1
+lib/retention.ps1
 lib/schedule.ps1
 lib/sectools.ps1
 lib/security_currency.ps1
@@ -67,6 +69,8 @@ skills/grammar/audit-system/manifest.json
 skills/grammar/audit-system/SKILL.md
 skills/grammar/check-capacity/manifest.json
 skills/grammar/check-capacity/SKILL.md
+skills/grammar/check-data-footprint/manifest.json
+skills/grammar/check-data-footprint/SKILL.md
 skills/grammar/check-log-retention/manifest.json
 skills/grammar/check-log-retention/SKILL.md
 skills/grammar/check-security-currency/manifest.json

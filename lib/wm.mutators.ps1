@@ -25,6 +25,8 @@ $script:WM_MUTATORS = @(
     'service_restart'
     'pkg_install'
     'registry_set'
+    'journal_prune'
+    'retention_prune_files'
     'schedule_run'
     'schedule_install'
     'schedule_remove'

@@ -122,6 +122,47 @@ function journal_backup {
     Write-Warning "journal: backed up to $backup"
 }
 
+# --- Retention prune (DESTRUCTIVE — Prime Directive, wm-apply only) ----------
+# PowerShell port of journal_prune in journal.sh. Deleting old rows is destructive, so
+# it is listed in lib/wm.mutators.ps1 (the read-only wm.ps1 dispatcher refuses it; only the
+# apply dispatcher wm-apply.ps1, reachable solely from `watchman fix`, runs it) and it ALWAYS
+# backs up findings.db first. Active findings (open/regressed/in-review) are NEVER pruned.
+function journal_prune {
+    $fdays = if ($env:WATCHMAN_RETAIN_FINDINGS_DAYS) { [int]$env:WATCHMAN_RETAIN_FINDINGS_DAYS } else { 180 }
+    $mdays = if ($env:WATCHMAN_RETAIN_METRICS_DAYS)  { [int]$env:WATCHMAN_RETAIN_METRICS_DAYS }  else { 90 }
+    $rdays = if ($env:WATCHMAN_RETAIN_RUNS_DAYS)     { [int]$env:WATCHMAN_RETAIN_RUNS_DAYS }     else { 90 }
+    if (-not (Test-Path -LiteralPath $script:JOURNAL_DB)) { Write-Warning 'journal: no findings.db to prune.'; return }
+
+    Write-Warning "journal: PRUNE is a DESTRUCTIVE database operation under the Prime Directive — it"
+    Write-Warning "journal: deletes old terminal findings (fixed/ignored, last seen >${fdays}d ago),"
+    Write-Warning "journal: metrics rows >${mdays}d, and runs rows >${rdays}d, then VACUUMs. Active"
+    Write-Warning "journal: findings (open/regressed/in-review) are NEVER pruned. Backing up first."
+    journal_backup 'pre-prune'
+    _journal_write @"
+DELETE FROM findings
+  WHERE status IN ('fixed','ignored')
+    AND last_seen_at < datetime('now','-$fdays days');
+DELETE FROM metrics WHERE recorded_at < datetime('now','-$mdays days');
+DELETE FROM runs    WHERE started_at  < datetime('now','-$rdays days');
+VACUUM;
+"@
+    Write-Warning 'journal: prune complete (database vacuumed).'
+}
+
+# What journal_prune WOULD delete now, given the windows. Read-only (no DELETE).
+function journal_prune_candidates {
+    $fdays = if ($env:WATCHMAN_RETAIN_FINDINGS_DAYS) { [int]$env:WATCHMAN_RETAIN_FINDINGS_DAYS } else { 180 }
+    $mdays = if ($env:WATCHMAN_RETAIN_METRICS_DAYS)  { [int]$env:WATCHMAN_RETAIN_METRICS_DAYS }  else { 90 }
+    $rdays = if ($env:WATCHMAN_RETAIN_RUNS_DAYS)     { [int]$env:WATCHMAN_RETAIN_RUNS_DAYS }     else { 90 }
+    if (-not (Test-Path -LiteralPath $script:JOURNAL_DB)) { "findings`t0"; "metrics`t0"; "runs`t0"; return }
+    $f = _journal_sqlite "SELECT COUNT(*) FROM findings WHERE status IN ('fixed','ignored') AND last_seen_at < datetime('now','-$fdays days');"
+    $m = _journal_sqlite "SELECT COUNT(*) FROM metrics WHERE recorded_at < datetime('now','-$mdays days');"
+    $r = _journal_sqlite "SELECT COUNT(*) FROM runs WHERE started_at < datetime('now','-$rdays days');"
+    "terminal findings >${fdays}d`t$f"
+    "metrics rows >${mdays}d`t$m"
+    "runs rows >${rdays}d`t$r"
+}
+
 # --- Fingerprint ------------------------------------------------------------
 # Byte-identical to lib/journal.sh: sha256 over "family|profile|category|check_id|target" with
 # NO trailing newline, lowercase hex. (printf '%s|...' | sha256sum on the bash side.)

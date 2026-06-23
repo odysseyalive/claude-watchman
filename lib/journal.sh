@@ -133,6 +133,44 @@ journal_backup() {
     sqlite3 "$JOURNAL_DB" ".backup '$backup'" && echo "journal: backed up to $backup" >&2
 }
 
+# --- Retention prune (DESTRUCTIVE — Prime Directive, WM_APPLY only) ----------
+# Deleting old rows from findings.db is a destructive database operation, so it is
+# listed in lib/wm's _WM_MUTATORS (the read-only dispatcher refuses it without
+# WM_APPLY=1 — the unattended loop can never set that) and it ALWAYS backs up the
+# database before deleting. It is driven by the operator's `watchman fix` session
+# (fix-redflag, review tier), never the loop. What it removes, by retention window:
+#   * findings whose status is terminal ('fixed'/'ignored') and whose last_seen_at
+#     predates WATCHMAN_RETAIN_FINDINGS_DAYS — active findings (open/regressed/
+#     in-review) are NEVER pruned, whatever their age;
+#   * metrics rows older than WATCHMAN_RETAIN_METRICS_DAYS;
+#   * runs rows older than WATCHMAN_RETAIN_RUNS_DAYS;
+# then VACUUMs to return the freed pages to the filesystem.
+journal_prune() {
+    local fdays="${WATCHMAN_RETAIN_FINDINGS_DAYS:-180}"
+    local mdays="${WATCHMAN_RETAIN_METRICS_DAYS:-90}"
+    local rdays="${WATCHMAN_RETAIN_RUNS_DAYS:-90}"
+    [[ -f "$JOURNAL_DB" ]] || { echo "journal: no findings.db to prune." >&2; return 0; }
+
+    cat >&2 <<EOF
+journal: PRUNE is a DESTRUCTIVE database operation under the Prime Directive — it
+journal: deletes old terminal findings (fixed/ignored, last seen >${fdays}d ago),
+journal: metrics rows >${mdays}d, and runs rows >${rdays}d, then VACUUMs. Active
+journal: findings (open/regressed/in-review) are NEVER pruned. Backing up first.
+EOF
+    journal_backup "pre-prune"
+    _journal_write "
+DELETE FROM findings
+  WHERE status IN ('fixed','ignored')
+    AND last_seen_at < datetime('now','-$fdays days');
+DELETE FROM metrics WHERE recorded_at < datetime('now','-$mdays days');
+DELETE FROM runs    WHERE started_at  < datetime('now','-$rdays days');
+VACUUM;"
+    local rc=$?
+    (( rc == 0 )) && echo "journal: prune complete (database vacuumed)." >&2 \
+                  || echo "journal: prune FAILED (rc=$rc) — the pre-prune backup is intact." >&2
+    return $rc
+}
+
 # --- Fingerprint ------------------------------------------------------------
 # Stable dedup key. The same conceptual problem on a different family/profile
 # yields a DIFFERENT fingerprint by design (different remediation/urgency).
@@ -228,6 +266,22 @@ journal_run_finish() {
 }
 
 # --- Read helpers (no writes) ----------------------------------------------
+# What journal_prune WOULD delete right now, given the configured windows. Read-only
+# (no DELETE), so check-data-footprint can size the database-side prune without
+# touching a row. One "<label>\t<count>" line per class.
+journal_prune_candidates() {
+    local fdays="${WATCHMAN_RETAIN_FINDINGS_DAYS:-180}"
+    local mdays="${WATCHMAN_RETAIN_METRICS_DAYS:-90}"
+    local rdays="${WATCHMAN_RETAIN_RUNS_DAYS:-90}"
+    [[ -f "$JOURNAL_DB" ]] || { echo "findings	0"; echo "metrics	0"; echo "runs	0"; return 0; }
+    printf 'terminal findings >%sd\t%s\n' "$fdays" \
+        "$(_journal_sqlite "SELECT COUNT(*) FROM findings WHERE status IN ('fixed','ignored') AND last_seen_at < datetime('now','-$fdays days');")"
+    printf 'metrics rows >%sd\t%s\n' "$mdays" \
+        "$(_journal_sqlite "SELECT COUNT(*) FROM metrics WHERE recorded_at < datetime('now','-$mdays days');")"
+    printf 'runs rows >%sd\t%s\n' "$rdays" \
+        "$(_journal_sqlite "SELECT COUNT(*) FROM runs WHERE started_at < datetime('now','-$rdays days');")"
+}
+
 journal_count_open()  { _journal_sqlite "SELECT COUNT(*) FROM findings WHERE status IN ('open','regressed');"; }
 journal_count_regressed() { _journal_sqlite "SELECT COUNT(*) FROM findings WHERE status='regressed';"; }
 # Pretty-print findings, optionally filtered by status.

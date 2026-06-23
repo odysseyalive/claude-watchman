@@ -9,6 +9,8 @@
     { "op": "firewall_deny",  "risk_tier": "review", "needs_sudo": true },
     { "op": "service_enable", "risk_tier": "review", "needs_sudo": true },
     { "op": "service_restart","risk_tier": "review", "needs_sudo": true },
-    { "op": "config_edit",    "risk_tier": "safe",   "needs_sudo": true }
+    { "op": "config_edit",    "risk_tier": "safe",   "needs_sudo": true },
+    { "op": "journal_prune",        "risk_tier": "review", "needs_sudo": false },
+    { "op": "retention_prune_files","risk_tier": "review", "needs_sudo": false }
   ]
 }

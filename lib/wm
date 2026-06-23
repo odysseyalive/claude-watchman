@@ -48,14 +48,19 @@ cd "$WATCHMAN_ROOT"
 # crontab or systemd units; run forks a headless claude) are guarded too, so the loop can
 # never invoke the scheduler through the dispatcher — they are CLI-only (bin/watchman).
 # The read-only schedule_ledger_summary is NOT listed: send-report folds it into the email.
-_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install schedule_run schedule_install schedule_remove "
+# journal_prune (deletes old rows from findings.db) and retention_prune_files (deletes
+# watchman's own collected files) are destructive self-data hygiene — gated like any
+# other mutator, so the loop can never prune; only `watchman fix` can. The read-only
+# measurement fns (retention_report/_total_mb/_file_candidates, journal_prune_candidates)
+# are NOT listed.
+_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install journal_prune retention_prune_files schedule_run schedule_install schedule_remove "
 
 # Source the observe/analyze/report libs in dependency order: core first (the engines below
 # assume distro.sh/profile.sh are already loaded), then the engines, then the report path.
 # CLI-only libs (preflight/update/uninstall/selfcheck) are intentionally NOT sourced.
 # shellcheck source=/dev/null
 for _lib in journal.sh distro.sh profile.sh io-courtesy.sh \
-            capacity.sh webstats.sh security_currency.sh cpanel.sh sectools.sh shellhist.sh \
+            capacity.sh retention.sh webstats.sh security_currency.sh cpanel.sh sectools.sh shellhist.sh \
             monitor.sh smtp.sh schedule.sh; do
     [[ -r "lib/$_lib" ]] && source "lib/$_lib"
 done

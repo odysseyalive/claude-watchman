@@ -1,0 +1,8 @@
+{
+  "skill": "check-data-footprint",
+  "stage": "grammar",
+  "reads": [],
+  "commands": [],
+  "resolver_ops": ["journal_read"],
+  "fixes": []
+}

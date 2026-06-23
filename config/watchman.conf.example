@@ -26,6 +26,23 @@ WATCHMAN_MEM_WARN_PCT=90
 WATCHMAN_TOPFILES_COUNT=20          # how many largest files to list
 WATCHMAN_TOPFILES_MIN=+25M          # ignore files smaller than this (find -size syntax)
 
+# --- Self-data retention (keep claude-watchman's own footprint bounded) -----
+# check-data-footprint sizes the data claude-watchman itself collects under journal/
+# (the findings DB, the headless run.log, the cost ledger, db backups, monitor-state)
+# and raises a review-tier finding when it grows past the cap OR holds data past these
+# windows. It NEVER deletes — pruning is the operator's confirmed call under
+# `watchman fix` (journal_prune for DB rows, retention_prune_files for files), which
+# backs up findings.db first. Active findings (open/regressed/in-review) are never pruned.
+WATCHMAN_DATA_FOOTPRINT_WARN_MB=50   # journal/ total at/over this (MB) raises the finding
+WATCHMAN_RETAIN_FINDINGS_DAYS=180    # prune terminal (fixed/ignored) findings last seen older than this
+WATCHMAN_RETAIN_METRICS_DAYS=90      # prune metrics time-series rows older than this
+WATCHMAN_RETAIN_RUNS_DAYS=90         # prune run rows older than this
+WATCHMAN_RETAIN_RUNLOG_MB=10         # rotate run.log (keep recent tail) when larger than this
+WATCHMAN_RETAIN_RUNLOG_LINES=2000    # how many recent lines of run.log to keep on rotation
+WATCHMAN_RETAIN_BACKUPS=5            # keep this many newest findings.db.backup-* files
+WATCHMAN_RETAIN_MONITOR_DAYS=30      # prune journal/monitor-state snapshots older than this
+# Note: run-ledger.tsv is REPORTED but never auto-pruned — it feeds the lifetime cost summary.
+
 # --- Security currency (keep defenses current) ------------------------------
 # check-security-currency flags stale defenses with the exact update command (it
 # never applies one): a stale package DB, pending security updates, known-CVE

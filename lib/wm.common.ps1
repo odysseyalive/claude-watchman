@@ -27,7 +27,7 @@ function _wm_lib_order {
     return @(
         'wm.mutators.ps1',
         'journal.ps1', 'distro.ps1', 'profile.ps1', 'io-courtesy.ps1',
-        'capacity.ps1', 'webstats.ps1', 'security_currency.ps1', 'cpanel.ps1',
+        'capacity.ps1', 'retention.ps1', 'webstats.ps1', 'security_currency.ps1', 'cpanel.ps1',
         'sectools.ps1', 'shellhist.ps1', 'monitor.ps1', 'smtp.ps1', 'schedule.ps1'
     )
 }
