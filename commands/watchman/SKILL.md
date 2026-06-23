@@ -90,41 +90,55 @@ This pass is OBSERVE + REPORT ONLY — never apply a fix. (For unattended cadenc
 operator drives this with Claude Code's `/loop 6h /watchman loop` inside a tmux session
 they can re-attach to.)
 
-## monitor — Attended, announce-only watch of a single concern
+## monitor — Attended live watch of one concern; capability driven by the session profile
 
 `monitor` is the **inverse of `loop`**: where `loop` is a heavyweight whole-machine
-journaling pass on a long cadence, `monitor` is a lightweight, single-concern, **ephemeral**
-watch the operator runs *while they work*. The operator states — in plain words — what to
-keep an eye on, and each pass announces only what is **new** since the last pass, giving
-them a chance to react in real time. The canonical case: *"watch the Apache logs for CORS
-preflight rejections while I tune `Access-Control-Allow-Origin`."*
+journaling pass on a long cadence, `monitor` is a lightweight, single-concern watch the
+operator runs *while they work*. The operator states — in plain words — what to keep an eye
+on, and each pass announces only what is **new** since the last pass, giving them a chance to
+react in real time. The canonical case: *"watch the Apache logs for CORS preflight rejections
+while I tune `Access-Control-Allow-Origin`."*
 
 **The argument is a freeform focus**, e.g. `/watchman monitor "watch the nginx error log
 for CSP report-uri hits"` or `/watchman monitor "watch /var/log/myapp.log for stack
 traces"`. If no focus is given, explain the verb and stop.
 
-**How the operator drives it — their own `/loop`, in their own session.** monitor is one
-pass; the operator makes it recurring by running it under Claude Code's `/loop` in the
-session they are already working in:
+**How the operator drives it — their own `/loop`, in whichever session they launched.**
+monitor is one pass; the operator makes it recurring by running it under Claude Code's
+`/loop` in the session they are already working in:
 
 ```
 /loop 1m /watchman monitor "watch the apache error log for CORS preflight 403s"
 ```
 
 A 1–2 minute interval feels near-live during active testing. The watch lives and dies with
-that `/loop` — stop the loop (or close the session) and monitoring ends. This is the
-explicitly **attended** counterpart to the headless `watchman run`: there is **no email,
-no OS trigger, and no journal write** — monitor only announces, in-session, where the
-operator can see it.
+that `/loop` — stop the loop (or close the session) and monitoring ends. It is the
+**attended** counterpart to the headless `watchman run`: no email, no OS trigger.
 
-**This runs in the operator's normal session, NOT the loop's `dontAsk` profile.** Because
-the operator chooses what to watch, monitor needs to read arbitrary files and run arbitrary
-**read-only** commands — which the read-only loop allowlist deliberately does not grant. So
-monitor relies on the operator being present: the first time a pass reads a new file or runs
-a new command, Claude Code prompts, the operator approves, and the approval is remembered for
-the rest of the session. Do **not** try to widen any allowlist to silence those prompts.
+### The session profile drives the capability — monitor never branches on the mode
 
-**Each pass — decide a read-only probe, emit only the delta, interpret, announce:**
+monitor runs in **either** a `watchman safe` session **or** a `watchman fix` session, and
+its capability is decided entirely by that session's permission profile — NOT by a flag and
+NOT by monitor inspecting the mode (Claude Code does not expose the mode at runtime, so do
+**not** try to detect it). monitor always does the same thing — observe the live delta,
+announce it, and when it spots a fixable issue, stage the **exact** change and attempt to
+apply it. The ambient profile transparently allows or denies that attempt:
+
+- **`watchman safe`** (the read-only `dontAsk` profile): a mutating apply **auto-denies,
+  loudly and without a prompt**. So here monitor is observe-and-announce only — when it
+  stages a fix, it says *"this is a `watchman fix` change; relaunch with `watchman fix` to
+  apply it"* and journals nothing. Read probes are bounded to the observe allowlist (log
+  dirs, journald, `ss`, `lib/wm`), which already covers the web-log cases; a read outside it
+  simply denies, which is the same "relaunch in fix" signal. After the first denied apply in
+  a session, stop re-attempting applies this run and just announce — one harmless denial is
+  enough to learn the session is read-only.
+- **`watchman fix`** (the `"default"`-mode FIX profile): a staged apply **prompts per the
+  risk tier**, and that prompt **is** the confirmation. So here monitor becomes a tight
+  detect→propose→confirm→verify loop — the moment a CORS preflight 403 lands, it stages the
+  precise `Access-Control-Allow-Origin` change, the prompt pops, one keystroke confirms the
+  origin is legitimate, the change applies, and the **next tick confirms the 403s stopped.**
+
+### Each pass — observe the delta, announce, and (in a fix session) propose the fix
 
 1. From the focus, work out *what to read*. Resolve real paths through the library when the
    concern is web/server-shaped (e.g. `bash lib/wm webserver_log_paths`,
@@ -148,13 +162,24 @@ the rest of the session. Do **not** try to widen any allowlist to silence those 
    /api` got 403 in the last minute — your `Access-Control-Allow-Origin` doesn't list
    `https://staging.example.com`."*). If nothing new matches, say so briefly (one line) and
    end the pass — a quiet watch is a quiet pass.
+4. **If the finding is fixable, hand it to the fixer — never mutate from monitor directly.**
+   Route the apply through `skills/rhetoric/fix-redflag` so the risk tiers, the exact-change
+   display, the Prime-Directive gate, and journaling-on-apply all govern it. The fixer stages
+   the precise change, applies it strictly within its tier (`safe` may apply on the FIX
+   profile's pre-approval; `review` — which CORS always is — only after the per-change prompt;
+   `manual` — the canonical CSP case — is drafted and handed back, never auto-applied), and
+   journals the change via `lib/journal.sh` **when and only when** it actually applies one. In
+   a `watchman safe` session that apply auto-denies, so nothing is journaled and the observe
+   path stays ephemeral; in a `watchman fix` session the operator confirms and it lands.
 
-**Read-only, by the Prime Directive.** monitor observes; it never fixes. **Never use a
-mutating command as a watch probe** — no `rm`, no redirection that truncates a file, nothing
-that changes service or firewall state. If the operator's focus can only be satisfied by a
-mutating action, STOP and surface that instead of doing it. The two helpers above write only
-their own gitignored scratch state (offsets and snapshot baselines), which is the sanctioned
-advisory-state category — not a system change and not a journal database write.
+**The Prime Directive governs every apply.** monitor's *observe* path is pure read — the two
+helpers write only their own gitignored scratch state (offsets and snapshot baselines), never
+a system change and never a journal database write. **Never use a mutating command as a watch
+probe**, and **never apply a CORS or CSP change without explicit per-change confirmation** —
+auto-allowlisting whatever origin happens to trigger a 403 would let an attacker add itself,
+which is exactly why CORS is `review` tier and CSP is `manual`. The one judgment monitor must
+always leave to the operator is *whether a change is legitimate*; the session profile is what
+makes that boundary unbypassable.
 
 ## fix — Interactive remediation, bounded by risk tier
 

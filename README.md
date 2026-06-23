@@ -231,7 +231,7 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `/watchman audit` | Observe + analyze, journal findings. No fixes. |
 | `/watchman report` | Plain-language summary of the journal. |
 | `/watchman loop` | One pass: observe → journal → delta → email if it matters. |
-| `/watchman monitor "<focus>"` | Attended, announce-only watch of one concern you state in words. Run it under your own `/loop` while you work; it reports new activity in-session and writes nothing to the journal. See below. |
+| `/watchman monitor "<focus>"` | Attended live watch of one concern you state in words. Run it under your own `/loop` while you work; what it can do is set by the session you launch it in — observe-only under `watchman safe`, watch-and-fix (per-change confirmation) under `watchman fix`. See below. |
 | `/watchman fix` | Interactive remediation, bounded by each finding's risk tier. Don't type this one in a normal session — launch it from the shell with `watchman fix`, which opens the FIX profile and runs it for you (a plain session can't apply fixes; see below). |
 | `/watchman inventory` | What's installed and how it serves. |
 | `/watchman stats` | Privacy-respecting web traffic analytics from access logs. On demand, not the loop. |
@@ -263,23 +263,39 @@ to one with `watchman audit` / `watchman report`, which open a session already r
 
 ### Watch while you work
 
-`monitor` is the inverse of the recurring loop below: a lightweight, **announce-only** watch
-of a single thing you state in plain words, meant to run *while you change something* so you
-see the effect immediately. The classic case is tuning CORS or a Content-Security-Policy and
-watching the web server's logs for rejections as you go. It writes nothing to the journal and
-sends no email — it just tells you, in-session, what's new.
+`monitor` is the inverse of the recurring loop below: a lightweight watch of a single thing
+you state in plain words, meant to run *while you change something* so you see the effect
+immediately. The classic case is tuning CORS or a Content-Security-Policy and watching the
+web server's logs for rejections as you go. Each pass announces only what's new since the
+last one and points at the adjustment to make.
 
-You make it recurring with Claude Code's own `/loop`, in the session you're already working
-in. State the focus in words and pick a short interval:
+You make it recurring with Claude Code's own `/loop`, in whichever session you launched. State
+the focus in words and pick a short interval:
 
 ```
 /loop 1m /watchman monitor "watch the apache error log for CORS preflight 403s"
 ```
 
-Each tick reports only what appeared since the last one and points at the adjustment to make.
-Stop the loop (or close the session) and the watch ends — it lives only as long as you're
-there to act on it. The first time a pass reads a new file or runs a new command, Claude Code
-asks your approval, then remembers it for the session.
+**The session you launch it in decides what it can do — same command, two capabilities.**
+monitor never inspects the permission mode; it always observes, announces, and (when it spots
+a fixable issue) stages the exact change and tries to apply it. The profile you started the
+session under transparently allows or denies that apply:
+
+| | `watchman safe` (read-only) | `watchman fix` (remediation) |
+|---|---|---|
+| Watch the logs, announce what's new | yes | yes |
+| Apply a staged fix | auto-denied — "relaunch in `watchman fix`" | prompts you per change (that prompt is the confirmation) |
+| CORS change | flagged only | exact diff → one-click confirm → applied → next tick verifies |
+| CSP policy | flagged only | drafted and handed back — never auto-applied |
+| Journal / record | nothing (ephemeral) | only when a change is actually applied |
+
+Launched under `watchman safe`, monitor is a pure watcher — it tells you a CORS preflight got
+a 403 and what origin it was, and stops there. Launched under `watchman fix`, the same watch
+becomes a tight loop: the moment a 403 lands it stages the precise `Access-Control-Allow-Origin`
+change, you confirm with one keystroke that the origin is legitimate, it applies, and the next
+tick shows the rejections stopped. It never applies a CORS or CSP change without that
+per-change confirmation — deciding whether an origin is trustworthy is the one judgment it
+always leaves to you. Stop the loop (or close the session) and the watch ends.
 
 ### Recurring monitoring
 
