@@ -1,6 +1,6 @@
 # claude-watchman
 
-> **It only speaks up when something's wrong.** claude-watchman watches a Linux box,
+> **It only speaks up when something's wrong.** claude-watchman watches a Linux or macOS box,
 > remembers what it sees, and emails you only when something actually changes. A quiet
 > machine stays quiet. No dashboards to babysit, no alert fatigue.
 
@@ -11,7 +11,7 @@
 
 claude-watchman is a set of Claude Code skills that run one loop: look at the machine,
 write down what's wrong, help you fix it. It only reaches out when the picture changes.
-It runs on Debian/Ubuntu, RHEL-family, and Arch, and adapts to whether the box is a
+It runs on Debian/Ubuntu, RHEL-family, Arch, and macOS, and adapts to whether the box is a
 public **server** or a personal **workstation**.
 
 It drives proven tools (Lynis, CrowdSec, journald, your distro's own integrity
@@ -433,16 +433,16 @@ Run it on demand; it is deliberately **not** part of the monitoring loop:
 /watchman stats
 ```
 
-## Distro support
+## Platform support
 
-Skills stay distro-blind; one resolver knows the differences.
+Skills stay platform-blind; one resolver knows the differences.
 
-| | Debian / Ubuntu | RHEL family | Arch |
-|---|---|---|---|
-| Packages | apt / dpkg | dnf / rpm | pacman |
-| Firewall | ufw | firewalld | nftables / ufw |
-| MAC | AppArmor | SELinux | (none by default) |
-| Integrity | debsums | rpm -V | pacman -Qkk |
+| | Debian / Ubuntu | RHEL family | Arch | macOS |
+|---|---|---|---|---|
+| Packages | apt / dpkg | dnf / rpm | pacman | Homebrew |
+| Firewall | ufw | firewalld | nftables / ufw | pf |
+| MAC | AppArmor | SELinux | (none by default) | SIP |
+| Integrity | debsums | rpm -V | pacman -Qkk | codesign |
 
 ## Updating
 
