@@ -24,6 +24,10 @@ watchman_detect_family() {
     if [[ -n "${WATCHMAN_FAMILY:-}" ]]; then
         printf '%s\n' "$WATCHMAN_FAMILY"; return 0
     fi
+    # Darwin (macOS) has no /etc/os-release — detect before anything else.
+    if [[ "$(uname -s 2>/dev/null)" == Darwin ]]; then
+        WATCHMAN_FAMILY=darwin; printf '%s\n' "$WATCHMAN_FAMILY"; return 0
+    fi
     local id="" like=""
     if [[ -r /etc/os-release ]]; then
         # shellcheck disable=SC1091
@@ -41,10 +45,24 @@ watchman_detect_family() {
         if   command -v apt-get >/dev/null 2>&1; then f="debian"
         elif command -v dnf     >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then f="rhel"
         elif command -v pacman  >/dev/null 2>&1; then f="arch"
+        elif command -v brew    >/dev/null 2>&1; then f="darwin"
         else f="unknown"; fi
     fi
     WATCHMAN_FAMILY="$f"
     printf '%s\n' "$f"
+}
+
+# _stat_mtime <file> — portable mtime in seconds (Linux vs macOS stat syntax).
+_stat_mtime() {
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) stat -f%m "$1" 2>/dev/null ;;
+        *)      stat -c%Y "$1" 2>/dev/null ;;
+    esac
+}
+
+# _darwin_brew_prefix — homebrew prefix; works on both Intel and Apple Silicon.
+_darwin_brew_prefix() {
+    command -v brew >/dev/null 2>&1 && brew --prefix 2>/dev/null || echo /usr/local
 }
 
 # Convenience guard for callers.
@@ -54,9 +72,10 @@ watchman_family() { watchman_detect_family; }
 pkg_is_installed() {
     local p="$1"
     case "$(watchman_family)" in
-        debian) dpkg -s "$p"     >/dev/null 2>&1 ;;
-        rhel)   rpm -q "$p"      >/dev/null 2>&1 ;;
-        arch)   pacman -Qi "$p"  >/dev/null 2>&1 ;;
+        debian) dpkg -s "$p"            >/dev/null 2>&1 ;;
+        rhel)   rpm -q "$p"             >/dev/null 2>&1 ;;
+        arch)   pacman -Qi "$p"         >/dev/null 2>&1 ;;
+        darwin) brew list --formula "$p" >/dev/null 2>&1 ;;
         *) return 2 ;;
     esac
 }
@@ -67,6 +86,7 @@ pkg_install() {
         debian) sudo apt-get install -y "$@" ;;
         rhel)   sudo dnf install -y "$@" ;;
         arch)   sudo pacman -S --noconfirm "$@" ;;
+        darwin) brew install "$@" ;;
         *) echo "pkg_install: unknown family" >&2; return 2 ;;
     esac
 }
@@ -78,17 +98,20 @@ pkg_install_cmd() {
         debian) echo "sudo apt-get install" ;;
         rhel)   echo "sudo dnf install" ;;
         arch)   echo "sudo pacman -S" ;;
+        darwin) echo "brew install" ;;
         *) echo "" ;;
     esac
 }
 
 # NON-mutating: echo the package name for a command on THIS family (names diverge:
-# sqlite3 -> sqlite on Arch; cscli ships in the crowdsec package).
+# sqlite3 -> sqlite on Arch; cscli ships in the crowdsec package; sqlite3 is
+# built-in on macOS so brew installs it as 'sqlite').
 pkg_for_cmd() {
     case "$1:$(watchman_family)" in
-        sqlite3:arch) echo sqlite ;;
-        cscli:*)      echo crowdsec ;;
-        *)            echo "$1" ;;
+        sqlite3:arch)   echo sqlite ;;
+        sqlite3:darwin) echo sqlite ;;   # brew package name; macOS ships sqlite3 built-in
+        cscli:*)        echo crowdsec ;;
+        *)              echo "$1" ;;
     esac
 }
 
@@ -100,6 +123,7 @@ security_update_cmd() {
         debian) echo "sudo apt-get update && sudo apt-get upgrade" ;;
         rhel)   echo "sudo dnf upgrade --security" ;;
         arch)   echo "sudo pacman -Syu" ;;
+        darwin) echo "brew upgrade && softwareupdate --install --all" ;;
         *) echo "" ;;
     esac
 }
@@ -112,10 +136,14 @@ pkg_db_age_days() {
         debian) f="/var/lib/apt/periodic/update-success-stamp"; [[ -e "$f" ]] || f="/var/cache/apt/pkgcache.bin" ;;
         arch)   f="$(ls -1t /var/lib/pacman/sync/*.db 2>/dev/null | head -1 || true)" ;;
         rhel)   f="/var/cache/dnf" ;;
+        darwin)
+            # Homebrew tracks last update via git FETCH_HEAD in the core tap.
+            f="$(brew --repository 2>/dev/null)/.git/FETCH_HEAD"
+            ;;
     esac
     [[ -n "$f" && -e "$f" ]] || { echo -1; return; }
     now="$(date +%s)"
-    echo $(( (now - $(stat -c%Y "$f" 2>/dev/null || echo "$now")) / 86400 ))
+    echo $(( (now - $(_stat_mtime "$f" || echo "$now")) / 86400 ))
 }
 
 # Which CVE/vulnerability scanner is available for THIS family (none if absent).
@@ -124,6 +152,7 @@ vuln_scanner() {
         debian) command -v debsecan   >/dev/null 2>&1 && echo debsecan   || echo none ;;
         arch)   command -v arch-audit >/dev/null 2>&1 && echo arch-audit || echo none ;;
         rhel)   command -v dnf        >/dev/null 2>&1 && echo dnf        || echo none ;;
+        darwin) echo none ;;   # no CVE scanner available for Homebrew packages
         *) echo none ;;
     esac
 }
@@ -143,6 +172,7 @@ pkg_list_installed() {
         debian) dpkg-query -W -f='${Package}\n' 2>/dev/null ;;
         rhel)   rpm -qa --qf '%{NAME}\n' 2>/dev/null ;;
         arch)   pacman -Qq 2>/dev/null ;;
+        darwin) brew list --formula 2>/dev/null ;;
         *) return 2 ;;
     esac
 }
@@ -152,16 +182,54 @@ pkg_list_upgradable() {
         debian) apt-get -s upgrade 2>/dev/null | awk '/^Inst /{print $2}' ;;
         rhel)   dnf -q check-update 2>/dev/null | awk 'NF>=3 && $0!~/^Last metadata/{print $1}' ;;
         arch)   pacman -Qu 2>/dev/null | awk '{print $1}' ;;
+        darwin) brew outdated --formula 2>/dev/null | awk '{print $1}' ;;
         *) return 2 ;;
     esac
 }
 
 # --- Service operations -----------------------------------------------------
 # Read-only status is observe-path; enable/restart are mutating (fixer only).
-service_status()  { systemctl is-active "$1" 2>/dev/null; }
-service_enabled() { systemctl is-enabled "$1" 2>/dev/null; }
-service_enable()  { sudo systemctl enable --now "$1"; }     # MUTATING
-service_restart() { sudo systemctl restart "$1"; }          # MUTATING
+# On Darwin, brew services is the primary wrapper for Homebrew-managed services;
+# launchctl is used for system-level services. Service names on macOS are often
+# labels (e.g. homebrew.mxcl.nginx) — brew services abstracts this.
+service_status() {
+    case "$(watchman_family)" in
+        darwin)
+            if command -v brew >/dev/null 2>&1; then
+                brew services list 2>/dev/null \
+                    | awk -v s="$1" '$1==s{print ($2=="started")?"active":"inactive"; f=1} END{if(!f) print "inactive"}'
+            else
+                launchctl list 2>/dev/null | grep -q "$1" && echo active || echo inactive
+            fi ;;
+        *) systemctl is-active "$1" 2>/dev/null ;;
+    esac
+}
+service_enabled() {
+    case "$(watchman_family)" in
+        darwin)
+            # A service is "enabled" on macOS if its plist is in LaunchDaemons/LaunchAgents.
+            local ld=/Library/LaunchDaemons la=/Library/LaunchAgents
+            { ls "$ld"/*"$1"*.plist "$la"/*"$1"*.plist 2>/dev/null | grep -q .; } \
+                && echo enabled || echo disabled ;;
+        *) systemctl is-enabled "$1" 2>/dev/null ;;
+    esac
+}
+service_enable() {   # MUTATING
+    case "$(watchman_family)" in
+        darwin)
+            command -v brew >/dev/null 2>&1 && brew services start "$1" \
+                || sudo launchctl load -w "/Library/LaunchDaemons/$1.plist" ;;
+        *) sudo systemctl enable --now "$1" ;;
+    esac
+}
+service_restart() {  # MUTATING
+    case "$(watchman_family)" in
+        darwin)
+            command -v brew >/dev/null 2>&1 && brew services restart "$1" \
+                || sudo launchctl kickstart -k "system/$1" ;;
+        *) sudo systemctl restart "$1" ;;
+    esac
+}
 
 # --- Firewall operations ----------------------------------------------------
 # Resolves to ufw / firewalld / nftables. firewall_list is read-only; allow/deny
@@ -172,9 +240,10 @@ watchman_firewall_backend() {
     if [[ -n "${WATCHMAN_FIREWALL:-}" ]]; then printf '%s\n' "$WATCHMAN_FIREWALL"; return; fi
     local b=""
     case "$(watchman_family)" in
-        debian) command -v ufw       >/dev/null 2>&1 && b="ufw" ;;
+        darwin) b="pf" ;;   # macOS uses pf; Application Firewall is separate but not scriptable here
+        debian) command -v ufw          >/dev/null 2>&1 && b="ufw" ;;
         rhel)   command -v firewall-cmd >/dev/null 2>&1 && b="firewalld" ;;
-        arch)   command -v ufw       >/dev/null 2>&1 && b="ufw" ;;
+        arch)   command -v ufw          >/dev/null 2>&1 && b="ufw" ;;
     esac
     # Fall back by what is actually present, then to nftables/iptables.
     [[ -z "$b" ]] && command -v firewall-cmd >/dev/null 2>&1 && b="firewalld"
@@ -187,6 +256,7 @@ watchman_firewall_backend() {
 
 firewall_list() {
     case "$(watchman_firewall_backend)" in
+        pf)        sudo pfctl -s rules 2>/dev/null ;;
         ufw)       sudo ufw status verbose ;;
         firewalld) sudo firewall-cmd --list-all ;;
         nftables)  sudo nft list ruleset ;;
@@ -198,6 +268,7 @@ firewall_list() {
 firewall_allow() {
     local spec="$1"
     case "$(watchman_firewall_backend)" in
+        pf)        echo "firewall_allow: pf rules are operator-authored anchor files; refusing to auto-generate. Add a rule to /etc/pf.anchors/watchman and load with: sudo pfctl -f /etc/pf.conf" >&2; return 3 ;;
         ufw)       sudo ufw allow "$spec" ;;
         firewalld) sudo firewall-cmd --permanent --add-port="${spec/\//\/}" && sudo firewall-cmd --reload ;;
         nftables)  echo "firewall_allow: nftables changes are operator-authored; refusing to guess a rule." >&2; return 3 ;;
@@ -207,6 +278,7 @@ firewall_allow() {
 firewall_deny() {  # MUTATING — review-tier
     local spec="$1"
     case "$(watchman_firewall_backend)" in
+        pf)        echo "firewall_deny: pf rules are operator-authored anchor files; refusing to auto-generate. See /etc/pf.anchors/watchman." >&2; return 3 ;;
         ufw)       sudo ufw deny "$spec" ;;
         firewalld) sudo firewall-cmd --permanent --remove-port="$spec" && sudo firewall-cmd --reload ;;
         nftables)  echo "firewall_deny: nftables changes are operator-authored; refusing to guess a rule." >&2; return 3 ;;
@@ -220,6 +292,11 @@ firewall_deny() {  # MUTATING — review-tier
 # (and the preflight) know to read via journalctl rather than a file.
 log_path_auth() {
     case "$(watchman_family)" in
+        darwin)
+            # macOS Unified Log — no flat file. Sentinel tells callers to use
+            # `log show --predicate 'process == "sshd"' --last 24h`.
+            echo "darwin:log:process==sshd"
+            return ;;
         debian) [[ -f /var/log/auth.log ]] && { echo /var/log/auth.log; return; } ;;
         rhel)   [[ -f /var/log/secure   ]] && { echo /var/log/secure;   return; } ;;
         arch)   [[ -f /var/log/auth.log ]] && { echo /var/log/auth.log; return; } ;;
@@ -245,21 +322,33 @@ log_path_auth() {
     # inventory-services' job, on the resolved unit). Package names vary by family
     # (Debian apache2 / RHEL httpd / Arch apache).
 webserver_detect() {
-    # nginx
-    if [[ -d /etc/nginx ]] || pkg_is_installed nginx 2>/dev/null; then
-        printf 'nginx\t%s\n' "$([[ -d /etc/nginx ]] && echo /etc/nginx)"
+    local bp=""
+    [[ "$(watchman_family)" == darwin ]] && bp="$(_darwin_brew_prefix)"
+
+    # nginx — Linux: /etc/nginx; macOS Homebrew: <prefix>/etc/nginx
+    local nginx_conf=/etc/nginx
+    [[ -n "$bp" && -d "$bp/etc/nginx" ]] && nginx_conf="$bp/etc/nginx"
+    if [[ -d "$nginx_conf" ]] || pkg_is_installed nginx 2>/dev/null; then
+        printf 'nginx\t%s\n' "$([[ -d "$nginx_conf" ]] && echo "$nginx_conf")"
     fi
-    # apache — Debian ships apache2, RHEL ships httpd, Arch ships apache
+
+    # apache — Debian: apache2, RHEL: httpd, Arch: apache, macOS: /etc/apache2 (built-in)
+    #          Homebrew apache on macOS: <prefix>/etc/httpd
     if   [[ -d /etc/apache2 ]]; then printf 'apache\t%s\n' /etc/apache2
     elif [[ -d /etc/httpd   ]]; then printf 'apache\t%s\n' /etc/httpd
+    elif [[ -n "$bp" && -d "$bp/etc/httpd" ]]; then printf 'apache\t%s\n' "$bp/etc/httpd"
     elif pkg_is_installed apache2 2>/dev/null || pkg_is_installed httpd 2>/dev/null \
         || pkg_is_installed apache 2>/dev/null; then
         printf 'apache\t\n'
     fi
+
     # caddy
-    if [[ -d /etc/caddy ]] || pkg_is_installed caddy 2>/dev/null; then
-        printf 'caddy\t%s\n' "$([[ -d /etc/caddy ]] && echo /etc/caddy)"
+    local caddy_conf=/etc/caddy
+    [[ -n "$bp" && -d "$bp/etc/caddy" ]] && caddy_conf="$bp/etc/caddy"
+    if [[ -d "$caddy_conf" ]] || pkg_is_installed caddy 2>/dev/null; then
+        printf 'caddy\t%s\n' "$([[ -d "$caddy_conf" ]] && echo "$caddy_conf")"
     fi
+
     # lighttpd
     if [[ -d /etc/lighttpd ]] || pkg_is_installed lighttpd 2>/dev/null; then
         printf 'lighttpd\t%s\n' "$([[ -d /etc/lighttpd ]] && echo /etc/lighttpd)"
@@ -363,9 +452,16 @@ webserver_log_paths() {
     done < <(webserver_detect)
 
     # Safety-net union: well-known dirs that actually exist on disk.
-    for p in /var/log/nginx /var/log/apache2 /var/log/httpd /var/log/caddy /var/log/lighttpd; do
+    # Includes macOS Homebrew var paths (both Intel /usr/local and Apple Silicon /opt/homebrew).
+    local _bp=""
+    [[ "$(watchman_family)" == darwin ]] && _bp="$(_darwin_brew_prefix 2>/dev/null)"
+    for p in /var/log/nginx /var/log/apache2 /var/log/httpd /var/log/caddy /var/log/lighttpd \
+              /usr/local/var/log/nginx /opt/homebrew/var/log/nginx \
+              /usr/local/var/log/httpd /opt/homebrew/var/log/httpd; do
         [[ -d "$p" ]] && _wlp_add_dir "$p"
     done
+    [[ -n "$_bp" && -d "$_bp/var/log/nginx" ]] && _wlp_add_dir "$_bp/var/log/nginx"
+    [[ -n "$_bp" && -d "$_bp/var/log/httpd" ]] && _wlp_add_dir "$_bp/var/log/httpd"
 
     # Guarantee ≥1 line so callers and the preflight always have a target.
     (( ${#results[@]} )) || results+=(/var/log/nginx)
@@ -382,8 +478,9 @@ log_path_lynis() { echo /var/log/lynis-report.dat; }
 # --- Mandatory Access Control ----------------------------------------------
 # Three DIFFERENT findings, never one. Echoes "layer:state" so the skill journals
 # the correct family-specific finding (and never checks AppArmor on RHEL, etc.).
-mac_layer() {   # echoes one of: apparmor | selinux | none
+mac_layer() {   # echoes one of: apparmor | selinux | sip | none
     case "$(watchman_family)" in
+        darwin) echo sip ;;       # System Integrity Protection
         debian) echo apparmor ;;
         rhel)   echo selinux ;;
         arch)   echo none ;;
@@ -392,6 +489,10 @@ mac_layer() {   # echoes one of: apparmor | selinux | none
 }
 mac_state() {   # echoes: enforcing | complain | permissive | disabled | absent
     case "$(mac_layer)" in
+        sip)
+            if command -v csrutil >/dev/null 2>&1; then
+                csrutil status 2>/dev/null | grep -qi "enabled" && echo enforcing || echo disabled
+            else echo absent; fi ;;
         apparmor)
             if command -v aa-status >/dev/null 2>&1; then
                 sudo aa-status --enabled >/dev/null 2>&1 && echo enforcing || echo complain
@@ -408,8 +509,9 @@ mac_state() {   # echoes: enforcing | complain | permissive | disabled | absent
 # --- Auto-update mechanism --------------------------------------------------
 # Returns the family's mechanism, or "rolling" for Arch where "security updates
 # not automated" is a meaningless finding — callers must NOT emit one there.
-autoupdate_mechanism() {  # echoes: unattended-upgrades | dnf-automatic | rolling
+autoupdate_mechanism() {  # echoes: unattended-upgrades | dnf-automatic | rolling | softwareupdate
     case "$(watchman_family)" in
+        darwin) echo softwareupdate ;;
         debian) echo unattended-upgrades ;;
         rhel)   echo dnf-automatic ;;
         arch)   echo rolling ;;
@@ -418,6 +520,9 @@ autoupdate_mechanism() {  # echoes: unattended-upgrades | dnf-automatic | rollin
 }
 autoupdate_enabled() {    # 0=enabled, 1=not, 2=n/a(rolling)
     case "$(autoupdate_mechanism)" in
+        softwareupdate)
+            # macOS: AutomaticCheckEnabled + AutomaticDownload in SoftwareUpdate prefs.
+            [[ "$(defaults read /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled 2>/dev/null)" == 1 ]] ;;
         unattended-upgrades) pkg_is_installed unattended-upgrades && [[ "$(service_enabled unattended-upgrades)" == enabled ]] ;;
         dnf-automatic)       pkg_is_installed dnf-automatic && [[ "$(service_enabled dnf-automatic.timer)" == enabled ]] ;;
         rolling)             return 2 ;;
@@ -429,14 +534,15 @@ autoupdate_enabled() {    # 0=enabled, 1=not, 2=n/a(rolling)
 # Wraps the family's own verification tool; the resolver hides which ran.
 # integrity_verifier echoes the tool name; integrity_verify_all runs it read-only
 # and prints modified files (empty output = clean).
-integrity_verifier() {  # echoes: debsums | rpm | pacman | aide | none
+integrity_verifier() {  # echoes: debsums | rpm | pacman | aide | codesign | none
     if command -v aide >/dev/null 2>&1 && [[ -f /var/lib/aide/aide.db.gz || -f /var/lib/aide/aide.db ]]; then
         echo aide; return
     fi
     case "$(watchman_family)" in
-        debian) command -v debsums >/dev/null 2>&1 && echo debsums || echo none ;;
-        rhel)   command -v rpm     >/dev/null 2>&1 && echo rpm     || echo none ;;
-        arch)   command -v pacman  >/dev/null 2>&1 && echo pacman  || echo none ;;
+        darwin) command -v codesign >/dev/null 2>&1 && echo codesign || echo none ;;
+        debian) command -v debsums  >/dev/null 2>&1 && echo debsums  || echo none ;;
+        rhel)   command -v rpm      >/dev/null 2>&1 && echo rpm      || echo none ;;
+        arch)   command -v pacman   >/dev/null 2>&1 && echo pacman   || echo none ;;
         *) echo none ;;
     esac
 }
@@ -446,6 +552,17 @@ integrity_verify_all() {
     # compete with a busy server's real workload; otherwise run it plain.
     _iv() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
     case "$(integrity_verifier)" in
+        codesign)
+            # macOS primary integrity is SIP. Report if disabled; then spot-verify key binaries.
+            if command -v csrutil >/dev/null 2>&1 && ! csrutil status 2>/dev/null | grep -qi "enabled"; then
+                echo "SIP (System Integrity Protection) is DISABLED — system files are unprotected"
+            fi
+            # Spot-verify critical system binaries via codesign.
+            local b
+            for b in /usr/bin/ssh /usr/bin/sudo /bin/bash /usr/sbin/sshd /usr/bin/codesign; do
+                [[ -f "$b" ]] || continue
+                /usr/bin/codesign --verify "$b" 2>&1 | grep -v '^$' || true
+            done ;;
         debsums) _iv sudo debsums -c 2>/dev/null ;;            # prints failures only
         rpm)     _iv rpm -Va 2>/dev/null | awk '$1 ~ /5/{print $NF}' ;;  # files w/ MD5 mismatch
         pacman)  _iv pacman -Qkk 2>/dev/null | awk '/warning|FAILED/{print}' ;;

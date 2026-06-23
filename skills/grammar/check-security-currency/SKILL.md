@@ -59,15 +59,22 @@ current defenses too.
 3. **Journal each record** through the dispatcher exactly as emitted
    (pass `"" ""` for family/profile — journal_upsert auto-resolves them):
    `bash lib/wm journal_upsert "" "" <category> <severity> <risk_tier> <check_id> <target> <title> <detail> <remediation>`.
+   On Darwin the resolvers behind `seccur_scan` behave platform-specifically: `pkg_db_age_days`
+   measures days since the last `brew update` (Homebrew git FETCH_HEAD mtime); `autoupdate_enabled`
+   reads macOS Software Update prefs (`com.apple.SoftwareUpdate AutomaticCheckEnabled`);
+   `pkg_list_upgradable` uses `brew outdated --formula`; `security_update_cmd` is
+   `brew upgrade && softwareupdate --install --all`; and `vuln_scanner` returns `none` (no CVE
+   scanner exists for Homebrew packages — surface that gap in the finding `detail`).
    `target` is the subject (packages / cve / clamav / a mechanism) so the fingerprint is
    stable and a re-stale defense **regresses loudly** on the next run.
 4. **Tiers — never apply.** `security_updates_pending`, `vuln_packages`, `auto_security_updates_off`,
    `*_stale` are `review` (the fixer shows the exact update command and confirms);
    `pkg_db_stale` and `aide_db_missing` are `manual` (investigate / initialize). NEVER run an
-   update, install, or `apt update`/`pacman -Sy` here — propose the command, the operator
-   decides. Applying is `fix-redflag`'s job under the risk tiers.
-5. **Summarize.** Lead with the highest-severity currency gap (a known-CVE package, or
-   auto-updates being off) and the one-line action; if clean, say the defenses look current.
+   update, install, or any package sync here — propose the command, the operator decides.
+5. **Summarize.** Lead with the highest-severity currency gap and the one-line action. On
+   Darwin, if `vuln_scanner=none`, note that CVE scanning for Homebrew packages is not
+   available and recommend periodically reviewing `brew audit --cask` manually. If clean,
+   say the defenses look current.
 <!-- /origin -->
 
 ## Grounding

@@ -1,6 +1,6 @@
 ---
 name: check-capacity
-description: "OBSERVE: disk, inodes, memory, and journal size against configured thresholds. A full disk or inode table breaks services silently."
+description: "OBSERVE: disk, inodes, memory, and log store size against configured thresholds. Handles both Linux (free/journalctl) and macOS (vm_stat/Unified Log)."
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash
 ---
@@ -33,7 +33,9 @@ Every `/watchman audit` / `/watchman loop`.
    `bash lib/wm journal_init`; load thresholds from `config/watchman.conf`: the warn band
    (`WATCHMAN_DISK_WARN_PCT`, `WATCHMAN_INODE_WARN_PCT`, `WATCHMAN_MEM_WARN_PCT`) and the
    danger band (`WATCHMAN_DISK_CRIT_PCT`, `WATCHMAN_INODE_CRIT_PCT`). A missing CRIT value
-   falls back to `95`.
+   falls back to `95`. Determine the family with `bash lib/wm watchman_family` and read the
+   printed value — it selects the platform-appropriate memory and log-store commands in
+   steps 4–5 (`darwin` ⇒ the macOS branch, otherwise the Linux branch).
 2. **Disk.** `df -P` per mounted filesystem (skip pseudo/`tmpfs`/`devtmpfs` and read-only
    mounts — they cannot be cleaned). Two bands, computed per mountpoint:
    - usage ≥ `WATCHMAN_DISK_CRIT_PCT` ⇒ **dangerously low: severity `critical` (red)** —
@@ -64,11 +66,24 @@ Every `/watchman audit` / `/watchman loop`.
 3. **Inodes.** `df -iP`; ≥ `WATCHMAN_INODE_CRIT_PCT` ⇒ severity `critical` (red), else ≥
    `WATCHMAN_INODE_WARN_PCT` ⇒ run `bash lib/wm profile_severity inode_capacity` and use the
    printed level as the literal severity. `check_id=inode_capacity`
-   (often the silent killer — a full inode table fails writes with space still free).
-4. **Memory.** `free`; sustained low available memory ⇒ `check_id=memory_pressure`.
-   Record current values; `diagnose-crash` correlates with OOM history.
-5. **Journal size.** `journalctl --disk-usage` vs `SystemMaxUse`; record as a capacity
-   metric and a finding if unbounded growth is observed.
+   (often the silent killer — a full inode table fails writes with space still free). On
+   Darwin/APFS, `df -iP` still reports inodes, but APFS allocates them dynamically (a very
+   large `ifree`, `%iused` ≈ 0), so this check self-suppresses on a healthy volume — which is
+   correct; no Darwin special-casing is needed.
+4. **Memory pressure** (`check_id=memory_pressure`; record current values — `diagnose-crash`
+   correlates them with OOM/jetsam history):
+   - **Linux** (family ≠ `darwin`): `free`; sustained low available memory ⇒ a finding.
+   - **macOS** (family == `darwin`): `vm_stat` page counts × the LIVE page size from
+     `bash lib/wm io_run sysctl -n hw.pagesize` (16384 on Apple Silicon, 4096 on Intel —
+     never hardcode it), measured against `sysctl -n hw.memsize`. Low available percentage ⇒
+     a finding; record `pages free`, `pages wired down`, and `pages active` (from `vm_stat`)
+     in `detail`.
+5. **Log store size** (`check_id=journal_size_unbounded`):
+   - **Linux** (family ≠ `darwin`): `journalctl --disk-usage` vs `SystemMaxUse`; record as a
+     capacity metric and a finding if unbounded growth is observed.
+   - **macOS** (family == `darwin`): `du -sh /var/db/diagnostics 2>/dev/null` for the Unified
+     Log store; record the size as an info metric. macOS sets no hard cap — note that to the
+     operator.
 6. **Journal each** with concrete numbers in `detail`. Never free space or delete
    files here — only observe.
 <!-- /origin -->

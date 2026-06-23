@@ -35,7 +35,8 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    `bash lib/wm <function> [args…]` — which sources the libs under bash internally; never
    `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
    `bash lib/wm journal_init`. Run `bash lib/wm profile_log_direction` (prints `inbound` or
-   `outbound`) and branch on that value. **I/O courtesy:** scanning large/rotated logs is heavy — IF
+   `outbound`) and branch on that value, and `bash lib/wm watchman_family` (the family
+   selects the Linux vs macOS auth-log and connection commands in step 3). **I/O courtesy:** scanning large/rotated logs is heavy — IF
    `bash lib/wm io_should_defer_heavy`, journal one `capacity`/`info`/`safe`
    `diagnostic_deferred` (`target=inspect-logs`, detail = `"deferred: "` followed by the printed
    output of `bash lib/wm io_pressure_reason`, run first; no `$(…)` substitution) and skip the log-scan/rate steps this pass;
@@ -50,11 +51,17 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    - inbound: scan EVERY directory listed by running `bash lib/wm webserver_log_paths` — this is
      config-derived (parsed from each present server's config), so it covers custom
      `access_log`/`CustomLog` targets, per-vhost logs, and niche servers, NOT just
-     `/var/log/{nginx,apache2,httpd}` — plus the auth-log path that `bash lib/wm log_path_auth`
-     prints (run it; use the literal) (or journald via
-     `journalctl -u sshd`) for repeated 4xx/401/auth-failure bursts;
-   - outbound: `ss -tunp` current connections; compare remote addresses against
-     `journal/network-baseline.txt` from `baseline-network`.
+     `/var/log/{nginx,apache2,httpd}`. For auth-failure bursts (repeated 4xx/401), run
+     `bash lib/wm log_path_auth` and branch on the literal it prints:
+     - a file path ⇒ scan that file;
+     - a `journald:*` sentinel ⇒ `journalctl -u sshd`;
+     - a `darwin:log:process==sshd` sentinel (macOS) ⇒
+       `bash lib/wm io_run log show --predicate 'process == "sshd"' --last 24h 2>/dev/null`
+       (requires Full Disk Access in System Settings > Privacy & Security).
+   - outbound — current connections compared against `journal/network-baseline.txt` from
+     `baseline-network`, branched on `bash lib/wm watchman_family`:
+     - Linux ⇒ `ss -tunp`;
+     - macOS (`darwin`) ⇒ `lsof -i -n -P 2>/dev/null | awk '/ESTABLISHED/{print $9}'`.
 4. **Request-rate spikes (DDoS / abuse) — server profile.** If
    `bash lib/wm profile_runs_check request_rate_spike`: run
    `bash lib/wm webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the
@@ -70,15 +77,14 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
    `risk_tier=review`, `check_id=request_rate_spike`, `target=<ip>` (per-IP, so the
    fingerprint is stable and a returning flooder regresses loudly); detail = the
    peak/min, total, and UA sample; remediation = `firewall_deny <ip>/32` — shown and
-   confirmed per the risk tiers. Bots/crawlers may appear here; the operator decides
-   (it is `review`, never auto-applied). CrowdSec, when present, is the real-time
-   enforcement layer; this is the log-cadence detector that proposes the rule.
+   confirmed per the risk tiers. Note: on macOS `firewall_deny` uses pf and will
+   explain the anchor-file approach rather than applying directly. Bots/crawlers may
+   appear here; the operator decides (it is `review`, never auto-applied).
 5. **Journal findings.** Inbound probe clusters → `category=security`; new outbound
    destinations → `category=security`, severity per `bash lib/wm profile_severity outbound_new_connections`.
    `check_id` stable per pattern/destination so re-runs update in place.
 6. **Never block or ban.** Enforcement (firewall/ban) is the operator-run fixer's
-   job under the risk tiers — this skill only observes and records. The rate-spike
-   finding PROPOSES the exact `firewall_deny` rule; it never applies it.
+   job under the risk tiers — this skill only observes and records.
 <!-- /origin -->
 
 ## Grounding

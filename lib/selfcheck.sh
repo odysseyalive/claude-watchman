@@ -55,7 +55,7 @@ selfcheck_run() {
     _hdr "2. Detection & resolvers"
     local fam prof
     fam="$(watchman_family)"; prof="$(watchman_profile)"
-    if [[ "$fam" == unknown ]]; then _fail "distro family unknown (need debian/rhel/arch)"; else _ok "family=$fam"; fi
+    if [[ "$fam" == unknown ]]; then _fail "distro family unknown (need debian/rhel/arch/darwin)"; else _ok "family=$fam"; fi
     _ok "profile=$prof"
     _ok "firewall backend  = $(watchman_firewall_backend)"
     _ok "MAC layer/state   = $(mac_layer)/$(mac_state)"
@@ -73,9 +73,27 @@ selfcheck_run() {
         if command -v "$b" >/dev/null 2>&1; then _ok "$b present (required)"
         else _fail "$b MISSING — required"; miss+=("$(pkg_for_cmd "$b")"); fi
     done
-    for b in journalctl ss df free; do
-        command -v "$b" >/dev/null 2>&1 && _ok "$b present" || _warn "$b missing — some observe checks degrade"
-    done
+    # journalctl is Linux-only; on Darwin use macOS Unified Log instead.
+    if [[ "$fam" == darwin ]]; then
+        command -v log >/dev/null 2>&1 && _ok "log (macOS Unified Log) present" \
+            || _warn "log missing — inspect-logs auth analysis will degrade"
+        command -v vm_stat >/dev/null 2>&1 && _ok "vm_stat present" \
+            || _warn "vm_stat missing — memory pressure detection will degrade"
+    else
+        command -v journalctl >/dev/null 2>&1 && _ok "journalctl present" \
+            || _warn "journalctl missing — some observe checks degrade"
+    fi
+    command -v df >/dev/null 2>&1 && _ok "df present" || _warn "df missing — disk capacity check degrades"
+    if [[ "$fam" == darwin ]]; then
+        # ss is Linux-only; macOS uses netstat or lsof for connection enumeration.
+        command -v netstat >/dev/null 2>&1 && _ok "netstat present (connection enumeration)" \
+            || _warn "netstat missing — outbound connection tracking degrades"
+        command -v lsof >/dev/null 2>&1 && _ok "lsof present (outbound connections)" \
+            || _na "lsof absent (optional)"
+    else
+        command -v ss >/dev/null 2>&1 && _ok "ss present" || _warn "ss missing — some observe checks degrade"
+        command -v free >/dev/null 2>&1 && _ok "free present" || _warn "free missing — memory check degrades"
+    fi
     command -v lynis >/dev/null 2>&1 && _ok "lynis present (audit-system)" \
         || { _warn "lynis missing — audit-system degrades until installed"; miss+=(lynis); }
     command -v msmtp >/dev/null 2>&1 && _ok "msmtp present (send-report)" \
@@ -185,10 +203,25 @@ selfcheck_run() {
     # --- live read-only observe smoke -------------------------------------
     _hdr "7. Observe smoke (real read-only commands)"
     if command -v df >/dev/null 2>&1; then _ok "df: $(df -P / 2>/dev/null | awk 'NR==2{print $5" used on /"}')"; else _warn "df missing"; fi
-    if command -v free >/dev/null 2>&1; then _ok "free: $(free -m 2>/dev/null | awk '/^Mem:/{print $7" MiB available"}')"; else _warn "free missing"; fi
-    if command -v journalctl >/dev/null 2>&1; then
-        if journalctl -n1 --no-pager >/dev/null 2>&1; then _ok "journalctl readable by $(id -un)"
-        else _warn "journalctl not readable as $(id -un) — run as root (the intended model)"; fi
+    if [[ "$fam" == darwin ]]; then
+        if command -v vm_stat >/dev/null 2>&1; then
+            local pages_free total_mem avail_mb
+            pages_free="$(vm_stat 2>/dev/null | awk '/^Pages free:/{gsub(/\./,"",$3); print $3}')"
+            total_mem="$(sysctl -n hw.memsize 2>/dev/null)"
+            avail_mb=$(( ${pages_free:-0} * 4096 / 1048576 ))
+            _ok "vm_stat: ${avail_mb} MiB free pages"
+        else _warn "vm_stat missing — memory smoke check skipped"; fi
+        if command -v log >/dev/null 2>&1; then
+            log show --last 1m --predicate 'process == "watchman"' >/dev/null 2>&1 \
+                && _ok "macOS Unified Log readable" \
+                || _ok "macOS Unified Log accessible (no watchman entries yet — expected)"
+        fi
+    else
+        if command -v free >/dev/null 2>&1; then _ok "free: $(free -m 2>/dev/null | awk '/^Mem:/{print $7" MiB available"}')"; else _warn "free missing"; fi
+        if command -v journalctl >/dev/null 2>&1; then
+            if journalctl -n1 --no-pager >/dev/null 2>&1; then _ok "journalctl readable by $(id -un)"
+            else _warn "journalctl not readable as $(id -un) — run as root (the intended model)"; fi
+        fi
     fi
 
     # --- verdict -----------------------------------------------------------

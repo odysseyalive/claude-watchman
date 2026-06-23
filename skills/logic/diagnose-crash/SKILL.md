@@ -1,6 +1,6 @@
 ---
 name: diagnose-crash
-description: "ANALYZE: OOM-killer / journalctl postmortem across boots. The evidence often lives in the boot BEFORE the current one, because the reboot followed the failure."
+description: "ANALYZE: crash and OOM postmortem. Linux: journalctl across boots. macOS: DiagnosticReports and Unified Log jetsam events."
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash
 ---
@@ -33,30 +33,53 @@ persisting across boots — see `check-log-retention`.
    `source lib/…` directly (dontAsk refuses a dot-source). Initialize with
    `bash lib/wm journal_init`. Determine the machine's family and profile by running
    `bash lib/wm watchman_family` and `bash lib/wm watchman_profile` and reading the printed
-   values — use them to decide which checks apply. You do NOT pass them to `journal_upsert`
-   (it auto-resolves them; pass `"" ""`). **I/O courtesy:** walking journald across boots
-   can be heavy — IF `bash lib/wm io_should_defer_heavy`, journal one
-   `capacity`/`info`/`safe` `diagnostic_deferred`
-   (`target=diagnose-crash`): first run `bash lib/wm io_pressure_reason`, then set detail to
-   `"deferred: "` followed by its printed output (no `$(…)`). Skip this pass.
-2. **Enumerate boots.** `bash lib/wm io_run sudo journalctl --list-boots`. Walk them **backward**
-   from the current boot.
-3. **Per boot, hunt the kernel's own words.** Search for
-   `Out of memory`, `Killed process`, `oom-kill`, and services exiting with
-   **code 137** (SIGKILL — typically the OOM killer), at idle priority:
-   `bash lib/wm io_run sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
-4. **Identify victim and hog.** From the OOM message extract the killed process and
-   the memory consumer. Correlate with `check-capacity`'s `memory_pressure` finding.
-5. **Journal a finding** `check_id=oom_recent_kill`, `target=<victim unit name>` —
-   the systemd unit of the killed process (`mysqld`), never a PID or a `pid 3614`
-   string: PIDs change every boot, so a PID-bearing target duplicates the finding
-   each run instead of folding it. `category=capacity`,
-   `severity=high`, `risk_tier=review` (the fix touches service config), with a
-   concrete remediation suggestion: protect the victim with
-   `OOMScoreAdjust=` or cap the offender with a cgroup `MemoryMax=`. Put the exact
-   unit and numbers in `detail`/`remediation`.
-6. **Explain, never act.** Applying `OOMScoreAdjust`/`MemoryMax` is `review`-tier and
-   belongs to the operator-run fixer.
+   values — use the family to pick the crash-evidence branch below. You do NOT pass them to
+   `journal_upsert` (it auto-resolves them; pass `"" ""`). **I/O courtesy:** walking journald
+   across boots — or `log show` on macOS — can be heavy: IF `bash lib/wm io_should_defer_heavy`,
+   journal one `capacity`/`info`/`safe` `diagnostic_deferred` (`target=diagnose-crash`): first
+   run `bash lib/wm io_pressure_reason`, then set detail to `"deferred: "` followed by its
+   printed output (no `$(…)`). Skip this pass.
+
+2. **Enumerate crash evidence (platform branch).**
+
+   **Linux (family ≠ `darwin`):**
+   - `bash lib/wm io_run sudo journalctl --list-boots` — walk boots **backward** from the
+     current boot.
+   - Per boot, hunt the kernel's own words for OOM kills, and services exiting with
+     **code 137** (SIGKILL — typically the OOM killer), at idle priority:
+     `bash lib/wm io_run sudo journalctl -b <id> -k -g 'Out of memory|Killed process|oom'`.
+
+   **macOS (family == `darwin`):**
+   - **DiagnosticReports.** List `/Library/Logs/DiagnosticReports/` and
+     `/Users/*/Library/Logs/DiagnosticReports/` — sort by mtime, read the most recent. The
+     memory-kill artifacts are `JetsamEvent-*.ips` (jetsam, with a reason field such as
+     `highwater` = per-process memory limit, or `vm-compressor-space-shortage` = system-wide
+     memory pressure); also scan recent `*.ips`/`*.crash` for `Exception Type: EXC_RESOURCE`.
+   - **Unified Log (memory kills).** `bash lib/wm io_run log show --predicate 'eventMessage
+     CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "killed"' --last 24h 2>/dev/null` —
+     extract process names and memory figures from the jetsam lines. `log show` can be slow:
+     always run it through `io_run` and cap the window (`--last 48h` maximum).
+   - **Note:** reading other users' DiagnosticReports needs sudo; if denied, limit the scan
+     to the system-level `/Library/Logs/DiagnosticReports/`.
+
+3. **Identify victim and hog.** From the OOM/jetsam evidence extract the killed process and
+   the memory consumer (the hog) driving the kill. Correlate with `check-capacity`'s
+   `memory_pressure` finding.
+
+4. **Journal a finding** `check_id=oom_recent_kill`, `category=capacity`, `severity=high`,
+   `risk_tier=review` (the fix touches service/app config). `target=<victim name>` — the
+   systemd unit on Linux (`mysqld`) or the process name on macOS, **never a PID or a
+   `pid 3614` string**: PIDs change every boot, so a PID-bearing target duplicates the
+   finding each run instead of folding it. Put the exact name and numbers in
+   `detail`/`remediation`, with a concrete suggestion:
+   - **Linux:** protect the victim with `OOMScoreAdjust=` or cap the offender with a cgroup
+     `MemoryMax=`.
+   - **macOS:** there is no `OOMScoreAdjust` and jetsam thresholds are not user-configurable;
+     suggest reviewing the offending process's memory use, increasing RAM, or configuring the
+     app's own memory limits.
+
+5. **Explain, never act.** Applying memory limits is `review`-tier and belongs to the
+   operator-run fixer.
 <!-- /origin -->
 
 ## Grounding
