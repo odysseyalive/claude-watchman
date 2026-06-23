@@ -41,6 +41,22 @@ hardening picture and track the Lynis hardening index as a trend.
    is `"deferred: "` followed by the printed output of `bash lib/wm io_pressure_reason` (run it
    first; do not use `$(…)` substitution), then SKIP the Lynis run this pass (retry
    next pass). Do NOT pile heavy I/O onto an already-loaded box.
+
+### Platform: Windows
+
+If `bash lib/wm watchman_family` is `windows`, **SKIP the Lynis run in step 2 below and its
+report-parsing entirely** (Lynis does not run on Windows and there is no
+`/var/log/lynis-report.dat` to parse). Instead run **`bash lib/wm windows_hardening_scan`**,
+which performs the native Defender / BitLocker / UAC / firewall / SMBv1 / RDP-NLA /
+Windows Update / Guest checks, journals each finding directly through `lib/journal.sh`, and
+records the tracked metric as **`windows_hardening_index`** (NOT the Lynis hardening index).
+Because the Windows scan journals its own findings and metric, steps 2–4 below (the
+Lynis-specific run, the `lynis_hardening_index` metric, and the `warning[]`/`suggestion[]`
+report parsing) do **not** apply on Windows. The I/O-courtesy gate (step 1b) and the
+self-footprint record (step 2c) still apply — run the scan through `bash lib/wm io_measure`
+as you would Lynis. On all non-Windows families (`debian`/`rhel`/`arch`/`darwin`), continue
+with the Lynis workflow below exactly as written.
+
 2. **Run Lynis** (read-only system audit) through `io_measure`, which both prices it at
    the role's I/O priority AND records what it cost:
    `bash lib/wm io_measure sudo lynis audit system --quiet --no-colors`. Lynis writes machine-readable

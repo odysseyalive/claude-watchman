@@ -58,10 +58,18 @@ Every `/watchman audit` / `/watchman loop`. On a workstation it pairs with
      - a `darwin:log:process==sshd` sentinel (macOS) ⇒
        `bash lib/wm io_run log show --predicate 'process == "sshd"' --last 24h 2>/dev/null`
        (requires Full Disk Access in System Settings > Privacy & Security).
+     - a `windows:*` sentinel (family == `windows`) ⇒ there is no `journalctl`; read the
+       Windows Security Event Log via the ported dispatcher function (`Get-WinEvent` under the
+       hood — the same `bash lib/wm` auth-log function `log_path_auth` resolves to on Windows),
+       hunting failed-logon events (Security **4625**) for auth-failure bursts. Do NOT shell
+       out to `journalctl`/`ss` on Windows.
    - outbound — current connections compared against `journal/network-baseline.txt` from
      `baseline-network`, branched on `bash lib/wm watchman_family`:
      - Linux ⇒ `ss -tunp`;
-     - macOS (`darwin`) ⇒ `lsof -i -n -P 2>/dev/null | awk '/ESTABLISHED/{print $9}'`.
+     - macOS (`darwin`) ⇒ `lsof -i -n -P 2>/dev/null | awk '/ESTABLISHED/{print $9}'`;
+     - Windows (`windows`) ⇒ there is no `ss`/`lsof`; enumerate established connections via the
+       ported dispatcher (`Get-NetTCPConnection`, the function `bash lib/wm` resolves to on
+       Windows) and compare against the baseline the same way.
 4. **Request-rate spikes (DDoS / abuse) — server profile.** If
    `bash lib/wm profile_runs_check request_rate_spike`: run
    `bash lib/wm webstats_rate_offenders` (threshold `$WATCHMAN_RATE_PER_MIN`, default 300 — the

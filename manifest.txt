@@ -15,10 +15,13 @@
 # `watchman update --check` asserts this list stays in lockstep with the product.
 
 hook bin/watchman
+bin/watchman.ps1
+watchman.cmd
 commands/watchman/SKILL.md
 config/watchman.conf.example
 .env.example
 install.sh
+install.ps1
 journal/schema.sql
 lib/capacity.sh
 lib/cpanel.sh
@@ -38,6 +41,27 @@ lib/uninstall.sh
 lib/update.sh
 lib/webstats.sh
 lib/wm
+lib/capacity.ps1
+lib/cpanel.ps1
+lib/distro.ps1
+lib/io-courtesy.ps1
+lib/journal.ps1
+lib/monitor.ps1
+lib/preflight.ps1
+lib/profile.ps1
+lib/schedule.ps1
+lib/sectools.ps1
+lib/security_currency.ps1
+lib/selfcheck.ps1
+lib/shellhist.ps1
+lib/smtp.ps1
+lib/uninstall.ps1
+lib/update.ps1
+lib/webstats.ps1
+lib/wm.common.ps1
+lib/wm.mutators.ps1
+lib/wm.ps1
+lib/wm-apply.ps1
 README.md
 skills/grammar/audit-system/manifest.json
 skills/grammar/audit-system/SKILL.md

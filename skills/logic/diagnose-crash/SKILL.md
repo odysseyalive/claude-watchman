@@ -62,21 +62,46 @@ persisting across boots — see `check-log-retention`.
    - **Note:** reading other users' DiagnosticReports needs sudo; if denied, limit the scan
      to the system-level `/Library/Logs/DiagnosticReports/`.
 
+   **Windows (family == `windows`):**
+   - There is no journald and no `journalctl`/exit-code-137 OOM-killer concept — Windows
+     records the equivalent events in the Event Log. Run
+     **`bash lib/wm diagnose_crash_events [days]`** (default window if `days` omitted), which
+     emits one TSV line per relevant event:
+     `<time>\t<log>\t<id>\t<source>\t<message>`. Parse those lines and map each event ID to
+     the crash evidence:
+     - **System 41** (`Kernel-Power`) — dirty / unexpected shutdown (the box went down
+       without a clean stop; the kernel logged it on the *next* boot, mirroring the Linux
+       "evidence lives in the prior boot" insight).
+     - **System 6008** — unexpected shutdown (the previous system shutdown was unexpected).
+     - **System 1001** (`BugCheck`) — a bugcheck / BSOD (stop error); the message carries the
+       bugcheck code.
+     - **Application 1000** — application crash (the app terminated unexpectedly).
+     - **Application 1001** (`Windows Error Reporting`) — a WER fault bucket for an app crash.
+   - On Windows, the "exit code 137 / OOM-killer" reasoning of the Linux branch is **replaced
+     by these event IDs** — there is no SIGKILL-from-OOM signal to grep for. Treat 41/6008/1001
+     as the unexpected-shutdown / crash evidence and App 1000/1001 as the app-crash evidence.
+
 3. **Identify victim and hog.** From the OOM/jetsam evidence extract the killed process and
    the memory consumer (the hog) driving the kill. Correlate with `check-capacity`'s
    `memory_pressure` finding.
 
 4. **Journal a finding** `check_id=oom_recent_kill`, `category=capacity`, `severity=high`,
    `risk_tier=review` (the fix touches service/app config). `target=<victim name>` — the
-   systemd unit on Linux (`mysqld`) or the process name on macOS, **never a PID or a
-   `pid 3614` string**: PIDs change every boot, so a PID-bearing target duplicates the
-   finding each run instead of folding it. Put the exact name and numbers in
-   `detail`/`remediation`, with a concrete suggestion:
+   systemd unit on Linux (`mysqld`), the process name on macOS, or on Windows the event
+   source / faulting process name (e.g. `Kernel-Power` for a 41/6008 shutdown, or the app
+   name from an Application 1000/1001 record), **never a PID or a `pid 3614` string**: PIDs
+   change every boot, so a PID-bearing target duplicates the finding each run instead of
+   folding it. Put the exact name and numbers in `detail`/`remediation`, with a concrete
+   suggestion:
    - **Linux:** protect the victim with `OOMScoreAdjust=` or cap the offender with a cgroup
      `MemoryMax=`.
    - **macOS:** there is no `OOMScoreAdjust` and jetsam thresholds are not user-configurable;
      suggest reviewing the offending process's memory use, increasing RAM, or configuring the
      app's own memory limits.
+   - **Windows:** there is no OOM killer to tune; for an unexpected-shutdown/BSOD (41/6008/1001)
+     suggest reviewing the bugcheck code, drivers, and the minidump under
+     `%SystemRoot%\Minidump`; for an app crash (1000/1001) suggest reviewing the faulting
+     module from the WER bucket and the app's own memory/stability settings.
 
 5. **Explain, never act.** Applying memory limits is `review`-tier and belongs to the
    operator-run fixer.

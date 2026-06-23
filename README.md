@@ -60,6 +60,28 @@ allowlist. Every privileged step asks first. There's no service user to create;
 claude-watchman runs as root and reads your logs directly. **The same command installs
 and updates** (see Updating).
 
+### Windows
+
+On Windows, claude-watchman runs as a native PowerShell port — no WSL, no Git Bash. Open an
+**elevated** PowerShell (Run as administrator — the analogue of root), make a directory, and run
+the installer one-liner. It detects the family/profile, sets up the journal and config, generates
+the Claude permission profiles, and adds the install dir to your PATH:
+
+```powershell
+mkdir watchman; cd watchman; iwr -useb https://raw.githubusercontent.com/odysseyalive/claude-watchman/main/install.ps1 | iex
+```
+
+Open a **new** elevated PowerShell so the PATH change takes effect, then run the plumbing check:
+
+```powershell
+watchman selfcheck
+```
+
+Everything else is identical to the Linux flow — `watchman audit`, `/watchman loop`, `watchman fix`
+— except the headless cadence uses Task Scheduler instead of systemd/cron (`watchman schedule
+install --every 6h`), and `audit-system` runs native Windows hardening checks (Defender, BitLocker,
+UAC, firewall, SMBv1, RDP/NLA) in place of Lynis.
+
 ## Quick start
 
 **1. Check the plumbing first (no Claude needed).** This proves the resolvers, journal,
@@ -437,12 +459,18 @@ Run it on demand; it is deliberately **not** part of the monitoring loop:
 
 Skills stay platform-blind; one resolver knows the differences.
 
-| | Debian / Ubuntu | RHEL family | Arch | macOS |
-|---|---|---|---|---|
-| Packages | apt / dpkg | dnf / rpm | pacman | Homebrew |
-| Firewall | ufw | firewalld | nftables / ufw | pf |
-| MAC | AppArmor | SELinux | (none by default) | SIP |
-| Integrity | debsums | rpm -V | pacman -Qkk | codesign |
+| | Debian / Ubuntu | RHEL family | Arch | macOS | Windows |
+|---|---|---|---|---|---|
+| Packages | apt / dpkg | dnf / rpm | pacman | Homebrew | winget / Windows Update |
+| Firewall | ufw | firewalld | nftables / ufw | pf | Defender Firewall |
+| MAC / protection | AppArmor | SELinux | (none by default) | SIP | Defender + BitLocker |
+| Integrity | debsums | rpm -V | pacman -Qkk | codesign | sfc / DISM |
+| Logs | journald / `/var/log` | journald / `/var/log` | journald | Unified Log | Event Log (Get-WinEvent) |
+| Cadence trigger | systemd / cron | systemd / cron | systemd / cron | launchd / cron | Task Scheduler |
+
+On Windows the implementation is a native PowerShell port (`lib/*.ps1`, `bin/watchman.ps1`,
+`install.ps1`) that runs elevated; the bash port (`lib/*.sh`) drives Linux and macOS. Both share
+the same journal schema, risk tiers, Prime Directive, and read-only-loop seatbelt.
 
 ## Updating
 

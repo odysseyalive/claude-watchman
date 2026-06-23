@@ -36,6 +36,20 @@ Every `/watchman audit` / `/watchman loop`.
    falls back to `95`. Determine the family with `bash lib/wm watchman_family` and read the
    printed value — it selects the platform-appropriate memory and log-store commands in
    steps 4–5 (`darwin` ⇒ the macOS branch, otherwise the Linux branch).
+
+### Platform: Windows
+
+If `bash lib/wm watchman_family` is `windows`, the raw POSIX tools used below (`df`, `free`,
+`journalctl --disk-usage`) do **not** exist. On Windows the dispatcher is mechanically
+rewritten to `pwsh -NoProfile -File lib/wm.ps1 <fn>`, and the same logical steps run through
+the **ported capacity functions** (the `lib/capacity.ps1` / `Get-Volume` path: per-volume
+free space for step 2's disk bands, the memory-pressure values for step 4, and the
+log-store / Event Log size for step 5). Use those `bash lib/wm` capacity functions exactly
+where the Linux branch would shell out to `df`/`free`/`journalctl`; keep the same
+`check_id`/`target`/`risk_tier` shapes and thresholds. **One difference: NTFS has no inode
+table, so SKIP the `inode_capacity` check (step 3) on Windows** — there is nothing to
+measure and no finding to journal. All other families run steps 2–5 as written below.
+
 2. **Disk.** `df -P` per mounted filesystem (skip pseudo/`tmpfs`/`devtmpfs` and read-only
    mounts — they cannot be cleaned). Two bands, computed per mountpoint:
    - usage ≥ `WATCHMAN_DISK_CRIT_PCT` ⇒ **dangerously low: severity `critical` (red)** —
