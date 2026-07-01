@@ -44,6 +44,13 @@ SCHED_SYSTEMD_DIR="/etc/systemd/system"
 SCHED_SERVICE="watchman-loop.service"
 SCHED_TIMER="watchman-loop.timer"
 SCHED_DEFAULT_INTERVAL="6h"
+# Generated-trigger version. BUMP THIS whenever the shape of the systemd unit or the
+# cron line changes, so an already-installed trigger can be detected as stale and the
+# operator told to re-run `watchman schedule install` (an on-disk unit is machine state,
+# so update/status DETECT drift but never rewrite it silently — see schedule_drift_notice).
+#   v1 = pre-HOME/PATH-fix shape (no version stamp on disk — absence == v1 == broken)
+#   v2 = HOME + PATH pinned into the trigger, deterministic env, self-test on install
+SCHED_UNIT_VERSION=2
 
 # --- the headless single pass (what the trigger fires) ----------------------
 # Runs ONE `/watchman loop` pass headless under the auto-discovered read-only
@@ -226,25 +233,28 @@ _sched_install_systemd() {
     local interval="$1"
     command -v systemctl >/dev/null 2>&1 || {
         echo "watchman schedule: systemctl not found — this host has no systemd. Use --cron." >&2; return 1; }
-    local svc="$SCHED_SYSTEMD_DIR/$SCHED_SERVICE" tmr="$SCHED_SYSTEMD_DIR/$SCHED_TIMER" f
+    local svc="$SCHED_SYSTEMD_DIR/$SCHED_SERVICE" tmr="$SCHED_SYSTEMD_DIR/$SCHED_TIMER" f verb="install" exists=0
     for f in "$svc" "$tmr"; do
         if [[ -e "$f" ]] && ! grep -q "$SCHED_UNIT_MARK" "$f" 2>/dev/null; then
             echo "watchman schedule: $f exists and is NOT a claude-watchman unit — refusing to overwrite it." >&2
             return 1
         fi
     done
+    # Re-running over an existing managed unit is the REPAIR/regenerate path (e.g. to heal a
+    # stale pre-v2 trigger) — word the prompt that way so it doesn't read as a fresh install.
+    if [[ -e "$svc" || -e "$tmr" ]]; then verb="regenerate"; exists=1; fi
     cat >&2 <<EOF
 
-watchman schedule: this is a SYSTEM CHANGE. It will install a systemd timer that
-runs a headless monitoring pass every $interval, writing two unit files and enabling
-the timer:
+watchman schedule: this is a SYSTEM CHANGE. It will ${verb^^} the claude-watchman systemd
+timer that runs a headless monitoring pass every $interval, $( ((exists)) && echo "rewriting" || echo "writing" ) two unit files and
+(re-)enabling the timer:
     $svc
     $tmr
     systemctl daemon-reload && systemctl enable --now $SCHED_TIMER
 It does NOT stop or alter any other service, and it is fully reversible with
 'watchman schedule remove'. The headless pass is read-only (it can apply no fixes).
 EOF
-    _sched_confirm "Install the systemd timer now?" || { echo "watchman schedule: aborted, nothing changed." >&2; return 1; }
+    _sched_confirm "${verb^} the systemd timer now?" || { echo "watchman schedule: aborted, nothing changed." >&2; return 1; }
     [[ -w "$SCHED_SYSTEMD_DIR" ]] || { echo "watchman schedule: $SCHED_SYSTEMD_DIR is not writable — run as root." >&2; return 1; }
 
     # Resolve HOME + PATH now, from the installing account, and bake them into the unit.
@@ -256,6 +266,7 @@ EOF
 
     cat >"$svc" <<EOF
 $SCHED_UNIT_MARK — DO NOT hand-edit; managed by 'watchman schedule'.
+# watchman-schedule-version: $SCHED_UNIT_VERSION
 [Unit]
 Description=claude-watchman — one headless monitoring loop pass
 Documentation=https://github.com/odysseyalive/claude-watchman
@@ -310,7 +321,9 @@ _sched_install_cron() {
     # minimal PATH has the same ~/.local/bin blind spot, so pin HOME + PATH resolved at install
     # time into the command rather than trusting a login shell to reconstruct them.
     _sched_resolve_env
-    local line="$expr HOME=\"$SCHED_ENV_HOME\" PATH=\"$SCHED_ENV_PATH\" /bin/bash -c 'exec \"$WATCHMAN_ROOT/bin/watchman\" run' >> \"$SCHED_RUNLOG\" 2>&1 $SCHED_CRON_MARK"
+    # Append a version token after the base mark ("… loop v2"); grep -F on SCHED_CRON_MARK
+    # still matches it, so status/remove are unaffected, while status can read the version.
+    local line="$expr HOME=\"$SCHED_ENV_HOME\" PATH=\"$SCHED_ENV_PATH\" /bin/bash -c 'exec \"$WATCHMAN_ROOT/bin/watchman\" run' >> \"$SCHED_RUNLOG\" 2>&1 $SCHED_CRON_MARK v$SCHED_UNIT_VERSION"
     cat >&2 <<EOF
 
 watchman schedule: this is a SYSTEM CHANGE. It will add ONE line to root's crontab,
@@ -338,24 +351,69 @@ EOF
     fi
 }
 
+# Read the generated-trigger version stamped on the INSTALLED trigger (not on the code).
+# Echoes the integer version, or 0 when a trigger IS installed but carries no stamp (a
+# pre-v2 install — the HOME/PATH-broken shape); echoes nothing when none is installed.
+# systemd wins if both are somehow present. Pure read; never mutates.
+_sched_installed_version() {
+    local v=""
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$SCHED_SYSTEMD_DIR/$SCHED_SERVICE" ]]; then
+        v="$(sed -n 's/^# watchman-schedule-version:[[:space:]]*//p' "$SCHED_SYSTEMD_DIR/$SCHED_SERVICE" 2>/dev/null | head -n1)"
+        echo "${v:-0}"; return 0
+    fi
+    if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF "$SCHED_CRON_MARK"; then
+        v="$(crontab -l 2>/dev/null | grep -F "$SCHED_CRON_MARK" | grep -oE 'v[0-9]+[[:space:]]*$' | grep -oE '[0-9]+' | head -n1)"
+        echo "${v:-0}"; return 0
+    fi
+    return 0   # nothing installed → echo nothing
+}
+
+# schedule_drift_notice — read-only drift detector. If a trigger is installed whose stamped
+# version is OLDER than this code's generator (SCHED_UNIT_VERSION) — or carries no stamp at
+# all (a pre-v2, HOME/PATH-broken install) — print a loud one-line notice naming the
+# one-command repair. Prints nothing when nothing is installed or it is already current.
+# Returns 0 when drift was reported, 1 otherwise. It NEVER rewrites the on-disk trigger: an
+# installed unit is machine state, so healing it stays an operator-confirmed `schedule
+# install` (which is idempotent and re-stamps to the current version). This is the hook
+# `watchman update` calls to warn an updating operator that their LIVE trigger is now stale.
+schedule_drift_notice() {
+    local iv label
+    iv="$(_sched_installed_version)"
+    [[ -z "$iv" ]] && return 1                    # nothing installed
+    (( iv >= SCHED_UNIT_VERSION )) && return 1    # current — no drift
+    # An unstamped trigger (iv==0) is the original pre-fix shape; call it "v1 (unstamped)".
+    (( iv == 0 )) && label="v1 (unstamped, pre-fix)" || label="v${iv}"
+    echo "watchman schedule: STALE TRIGGER — the installed headless schedule is ${label}, but this" >&2
+    echo "    claude-watchman is v${SCHED_UNIT_VERSION}. The pre-v2 trigger carries the HOME/PATH bug and" >&2
+    echo "    FAILS every run. Re-run 'watchman schedule install' to regenerate it (idempotent," >&2
+    echo "    operator-confirmed) — the code update does NOT rewrite an already-installed trigger." >&2
+    return 0
+}
+
 # schedule_status — read-only: report whichever trigger is installed + the ledger.
 schedule_status() {
     echo "claude-watchman schedule status" >&2
-    local found=0
+    local found=0 iv vlabel
+    iv="$(_sched_installed_version)"
+    (( ${iv:-0} == 0 )) && vlabel="v1 pre-fix" || vlabel="v${iv}"
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$SCHED_SYSTEMD_DIR/$SCHED_TIMER" ]]; then
         found=1
-        echo "  systemd timer: $SCHED_SYSTEMD_DIR/$SCHED_TIMER" >&2
+        echo "  systemd timer: $SCHED_SYSTEMD_DIR/$SCHED_TIMER ($vlabel)" >&2
         systemctl is-enabled "$SCHED_TIMER" >/dev/null 2>&1 && echo "    enabled" >&2 || echo "    present but not enabled" >&2
         systemctl list-timers "$SCHED_TIMER" --no-pager 2>/dev/null | sed 's/^/    /' >&2 || true
     fi
     if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF "$SCHED_CRON_MARK"; then
         found=1
-        echo "  cron entry (root):" >&2
+        echo "  cron entry (root, $vlabel):" >&2
         crontab -l 2>/dev/null | grep -F "$SCHED_CRON_MARK" | sed 's/^/    /' >&2
     fi
     (( found )) || echo "  no headless schedule installed (the tmux /loop is the other cadence — see README)." >&2
     echo "  --- token / cost ledger (headless runs) ---" >&2
     schedule_ledger_summary >&2
+    # Drift check last, so the STALE-TRIGGER warning + repair command are the final thing
+    # the operator sees (and it sits right under any is_error runs the ledger just reported).
+    (( found )) && schedule_drift_notice
+    return 0
 }
 
 # schedule_remove — tear down whichever trigger is installed. Stopping/disabling a

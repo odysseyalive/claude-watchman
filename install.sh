@@ -363,6 +363,19 @@ else
     warn "$LINK exists and is not a symlink — leaving it. Add $ROOT/bin to PATH yourself."
 fi
 
+# --- 7. Post-update drift notice -------------------------------------------
+# An install/update refreshes the PRODUCT but never rewrites machine state, so a headless
+# trigger already on disk keeps its old shape. If that shape predates the current generator
+# (e.g. the pre-v2 HOME/PATH-broken systemd unit), warn the operator to re-run
+# 'watchman schedule install' to regenerate it. Read-only; prints nothing on a fresh
+# install (no trigger yet) or when the installed trigger is already current.
+WATCHMAN_ROOT="$ROOT"
+# shellcheck source=lib/schedule.sh
+source "$ROOT/lib/schedule.sh" 2>/dev/null || true
+if declare -f schedule_drift_notice >/dev/null 2>&1; then
+    schedule_drift_notice || true
+fi
+
 # --- Done -------------------------------------------------------------------
 cat <<EOF
 
