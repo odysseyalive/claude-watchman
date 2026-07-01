@@ -51,16 +51,27 @@ SCHED_DEFAULT_INTERVAL="6h"
 # token use stays visible without a live meter. Returns claude's exit code.
 schedule_run() {
     cd "$WATCHMAN_ROOT" || { echo "watchman run: cannot cd to $WATCHMAN_ROOT" >&2; return 1; }
-    command -v claude >/dev/null 2>&1 || {
-        echo "watchman run: the 'claude' CLI is not on PATH — install Claude Code, and make sure" >&2
-        echo "              root has logged in once ('claude' then /login) so headless runs authenticate." >&2
-        return 1; }
 
     mkdir -p "$WATCHMAN_ROOT/journal"
     local started out rc
     started="$(date -Is 2>/dev/null || date)"
+    # Journal that a pass STARTED before the claude guard, so a pass that fails the
+    # guard is visible in run.log AND the ledger (surfaced by `watchman schedule
+    # status`) — not only in journald, where a headless failure would otherwise hide.
+    echo "[$started] watchman run: starting headless loop pass (HOME=${HOME:-unset} PATH=$PATH)" >>"$SCHED_RUNLOG"
+
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "watchman run: the 'claude' CLI is not on PATH — install Claude Code, and make sure" >&2
+        echo "              root has logged in once ('claude' then /login) so headless runs authenticate." >&2
+        echo "[$started] watchman run: FAILED — 'claude' not on PATH (HOME=${HOME:-unset} PATH=$PATH)" >>"$SCHED_RUNLOG"
+        # Record the failed pass in the ledger (cost 0, is_error=true) so it shows up in
+        # `watchman schedule status` instead of vanishing into journald.
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$started" "0" "0" "0" "0" "0" "0" "true" >>"$SCHED_LEDGER"
+        return 1
+    fi
+
     out="$(mktemp)"
-    echo "[$started] watchman run: starting headless loop pass" >>"$SCHED_RUNLOG"
 
     # Headless single pass. Natural-language prompt on purpose: Claude Code DROPS a
     # startup positional prompt that begins with '/', so "Run /watchman loop" (no
@@ -181,6 +192,36 @@ schedule_install() {
     esac
 }
 
+# Resolve the environment a headless pass needs, from the account this installer runs
+# as (root, for whom 'claude' already resolves). Sets SCHED_ENV_HOME / SCHED_ENV_PATH /
+# SCHED_ENV_CLAUDE. A User=-less systemd service starts with HOME unset and a bare PATH,
+# and cron runs with a minimal PATH — either way ~/.local/bin/claude (the DEFAULT install
+# location) is never found unless we pin HOME and PATH explicitly at install time rather
+# than trusting a non-interactive login shell + root's dotfiles. Warns (does not fail) if
+# 'claude' cannot be located, so the schedule still installs and the self-test flags it.
+_sched_resolve_env() {
+    SCHED_ENV_HOME="$(getent passwd root 2>/dev/null | cut -d: -f6)"
+    SCHED_ENV_HOME="${SCHED_ENV_HOME:-${HOME:-/root}}"
+    SCHED_ENV_CLAUDE="$(command -v claude 2>/dev/null || true)"
+    if [[ -n "$SCHED_ENV_CLAUDE" ]]; then
+        SCHED_ENV_PATH="$(dirname "$SCHED_ENV_CLAUDE"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    else
+        SCHED_ENV_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        echo "watchman schedule: WARNING — 'claude' is not on the installer's PATH. The schedule" >&2
+        echo "    will be created, but scheduled passes will fail until 'claude' is installed for" >&2
+        echo "    root and reachable on PATH (run 'claude' once and '/login' to authenticate headless runs)." >&2
+    fi
+}
+
+# Post-install self-test: confirm 'claude' actually resolves in the CLEAN environment the
+# trigger will run under (only HOME + PATH set, exactly as written into the unit / cron
+# line). `env -i` reproduces that stripped environment faithfully and is portable across
+# both back-ends. Returns 0 on success; the callers warn loudly on failure instead of
+# reporting a false success.
+_sched_selftest_env() {
+    env -i HOME="$SCHED_ENV_HOME" PATH="$SCHED_ENV_PATH" /bin/bash -c 'command -v claude >/dev/null 2>&1'
+}
+
 _sched_install_systemd() {
     local interval="$1"
     command -v systemctl >/dev/null 2>&1 || {
@@ -206,6 +247,13 @@ EOF
     _sched_confirm "Install the systemd timer now?" || { echo "watchman schedule: aborted, nothing changed." >&2; return 1; }
     [[ -w "$SCHED_SYSTEMD_DIR" ]] || { echo "watchman schedule: $SCHED_SYSTEMD_DIR is not writable — run as root." >&2; return 1; }
 
+    # Resolve HOME + PATH now, from the installing account, and bake them into the unit.
+    # A User=-less root service starts with HOME unset, so root's ~/.bashrc PATH logic
+    # (export PATH="$HOME/.local/bin:$PATH") collapses to "/.local/bin" and never finds
+    # ~/.local/bin/claude — the historic 100%-failure bug. Pinning both makes the service
+    # environment deterministic instead of dotfile-dependent, so we also drop the login shell.
+    _sched_resolve_env
+
     cat >"$svc" <<EOF
 $SCHED_UNIT_MARK — DO NOT hand-edit; managed by 'watchman schedule'.
 [Unit]
@@ -215,8 +263,11 @@ Documentation=https://github.com/odysseyalive/claude-watchman
 [Service]
 Type=oneshot
 WorkingDirectory=$WATCHMAN_ROOT
-# Login shell so the 'claude' CLI on root's PATH (often ~/.local/bin) is found.
-ExecStart=/bin/bash -lc 'exec "$WATCHMAN_ROOT/bin/watchman" run'
+# HOME + PATH resolved at install time: a User=-less service starts with HOME unset and a
+# bare PATH, so headless claude (in ~/.local/bin) and its credentials would not be found.
+Environment=HOME=$SCHED_ENV_HOME
+Environment=PATH=$SCHED_ENV_PATH
+ExecStart=/bin/bash -c 'exec "$WATCHMAN_ROOT/bin/watchman" run'
 EOF
 
     cat >"$tmr" <<EOF
@@ -237,6 +288,17 @@ EOF
     systemctl enable --now "$SCHED_TIMER" || { echo "watchman schedule: failed to enable $SCHED_TIMER." >&2; return 1; }
     echo "watchman schedule: systemd timer installed and started (every $interval). Next runs:" >&2
     systemctl list-timers "$SCHED_TIMER" --no-pager 2>/dev/null | sed 's/^/    /' >&2 || true
+
+    # Self-test the REAL trigger environment (HOME + PATH as baked into the unit). A green
+    # 'enable' does NOT prove the scheduled pass will find claude — verify it, warn loudly
+    # if not, rather than reporting a success that fails silently every interval.
+    if _sched_selftest_env; then
+        echo "watchman schedule: self-test OK — 'claude' resolves in the timer's environment." >&2
+    else
+        echo "watchman schedule: WARNING — self-test FAILED: 'claude' does NOT resolve under" >&2
+        echo "    HOME=$SCHED_ENV_HOME PATH=$SCHED_ENV_PATH. Every scheduled pass will fail until" >&2
+        echo "    this is fixed. Ensure claude is installed for root and 'claude'/'/login' has run." >&2
+    fi
 }
 
 _sched_install_cron() {
@@ -244,7 +306,11 @@ _sched_install_cron() {
     command -v crontab >/dev/null 2>&1 || {
         echo "watchman schedule: 'crontab' not found — install cron, or use --systemd." >&2; return 1; }
     expr="$(_sched_cron_expr "$interval")" || return 2
-    local line="$expr /bin/bash -lc 'exec \"$WATCHMAN_ROOT/bin/watchman\" run' >> \"$SCHED_RUNLOG\" 2>&1 $SCHED_CRON_MARK"
+    # Parity with the systemd path: HOME is fine (cron reads it from /etc/passwd), but cron's
+    # minimal PATH has the same ~/.local/bin blind spot, so pin HOME + PATH resolved at install
+    # time into the command rather than trusting a login shell to reconstruct them.
+    _sched_resolve_env
+    local line="$expr HOME=\"$SCHED_ENV_HOME\" PATH=\"$SCHED_ENV_PATH\" /bin/bash -c 'exec \"$WATCHMAN_ROOT/bin/watchman\" run' >> \"$SCHED_RUNLOG\" 2>&1 $SCHED_CRON_MARK"
     cat >&2 <<EOF
 
 watchman schedule: this is a SYSTEM CHANGE. It will add ONE line to root's crontab,
@@ -260,6 +326,16 @@ EOF
     { [[ -n "$current" ]] && printf '%s\n' "$current"; printf '%s\n' "$line"; } | crontab - || {
         echo "watchman schedule: failed to update root's crontab." >&2; return 1; }
     echo "watchman schedule: cron entry installed (every $interval). Output logs to $SCHED_RUNLOG." >&2
+
+    # Same post-install self-test as the systemd path: confirm claude resolves under the
+    # HOME + PATH the cron line pins, and warn loudly rather than fail silently every run.
+    if _sched_selftest_env; then
+        echo "watchman schedule: self-test OK — 'claude' resolves in the cron job's environment." >&2
+    else
+        echo "watchman schedule: WARNING — self-test FAILED: 'claude' does NOT resolve under" >&2
+        echo "    HOME=$SCHED_ENV_HOME PATH=$SCHED_ENV_PATH. Every scheduled pass will fail until" >&2
+        echo "    this is fixed. Ensure claude is installed for root and 'claude'/'/login' has run." >&2
+    fi
 }
 
 # schedule_status — read-only: report whichever trigger is installed + the ledger.
