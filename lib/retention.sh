@@ -36,9 +36,14 @@ JOURNAL_DIR="${JOURNAL_DIR:-$WATCHMAN_ROOT/journal}"
 _ret_bytes() { [[ -f "$1" ]] && wc -c <"$1" 2>/dev/null | tr -d ' ' || echo 0; }
 
 # Sum bytes of every regular file directly inside a directory tree (0 if absent).
+# `find -printf` is GNU-only; Darwin batches through `stat -f` instead (`-exec +`
+# keeps it a handful of forks, not one per file).
 _ret_dir_bytes() {
     [[ -d "$1" ]] || { echo 0; return; }
-    find "$1" -type f -printf '%s\n' 2>/dev/null | awk '{t+=$1} END{print t+0}'
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) find "$1" -type f -exec stat -f%z {} + 2>/dev/null | awk '{t+=$1} END{print t+0}' ;;
+        *)      find "$1" -type f -printf '%s\n' 2>/dev/null | awk '{t+=$1} END{print t+0}' ;;
+    esac
 }
 
 # Humanise a byte count to IEC units (du -h style), no per-file fork.

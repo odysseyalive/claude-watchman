@@ -54,7 +54,9 @@ io_run() {
             *)        pre+=(ionice -c3)     ;;   # idle (guest)
         esac
     fi
-    if [[ "${WATCHMAN_IONICE:-yes}" == yes ]] && command -v nice >/dev/null 2>&1; then
+    # CPU priority has its own INDEPENDENT toggle: turning off I/O deprioritization
+    # (WATCHMAN_IONICE=no) must not silently turn off CPU deprioritization too.
+    if [[ "${WATCHMAN_NICE:-yes}" == yes ]] && command -v nice >/dev/null 2>&1; then
         case "$(_io_role)" in
             priority) : ;;                       # normal CPU priority
             peer)     pre+=(nice -n10) ;;

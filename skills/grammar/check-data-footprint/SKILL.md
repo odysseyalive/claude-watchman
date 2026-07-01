@@ -99,8 +99,10 @@ claude-watchman's OWN data so the monitor never becomes the thing filling the di
 
 6. **Observe only.** Never run a prune from here. `journal_prune` and `retention_prune_files`
    are mutators the dispatcher refuses without `WM_APPLY=1`; pruning is the operator's
-   confirmed call under `watchman fix` (fix-redflag), governed by the risk tier and the
-   Prime Directive — not this skill.
+   confirmed call under `watchman fix` (fix-redflag) — not this skill. Note that
+   `journal_prune` deletes findings-DB rows, which is the Prime Directive's
+   destructive-database clause by name (not merely a `review`-tier op): it always
+   backs up findings.db first and proceeds only on the stop-warn-ask consent.
 <!-- /origin -->
 
 ## Grounding

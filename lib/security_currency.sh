@@ -90,7 +90,7 @@ seccur_scan() {
         local cvd age
         cvd="$(ls -1t /var/lib/clamav/*.cvd /var/lib/clamav/*.cld 2>/dev/null | head -1 || true)"
         if [[ -n "$cvd" ]]; then
-            age=$(( ( $(date +%s) - $(stat -c%Y "$cvd" 2>/dev/null || date +%s) ) / 86400 ))
+            age=$(( ( $(date +%s) - $(_stat_mtime "$cvd" 2>/dev/null || date +%s) ) / 86400 ))
             (( age > stale_days )) && _sc_emit security medium review clamav_sig_stale clamav \
                 "ClamAV virus signatures are ${age} days old" \
                 "Signatures older than ${stale_days}d miss recent malware. Refresh them and ensure the freshclam timer/daemon runs." \

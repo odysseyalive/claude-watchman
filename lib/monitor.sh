@@ -44,7 +44,7 @@ monitor_file_delta() {
     for f in "$@"; do
         [[ -f "$f" ]] || continue
         SEEN["$f"]=1
-        inode="$(stat -c%i "$f" 2>/dev/null)"; size="$(stat -c%s "$f" 2>/dev/null)"
+        inode="$(_stat_inode "$f" 2>/dev/null)"; size="$(_stat_size "$f" 2>/dev/null)"
         [[ -n "$inode" && -n "$size" ]] || continue
         start=0
         if [[ "${OFF_INODE[$f]:-}" == "$inode" && -n "${OFF_SIZE[$f]:-}" && "$size" -ge "${OFF_SIZE[$f]}" ]]; then

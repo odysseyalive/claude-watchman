@@ -61,22 +61,38 @@ update_sync_run() {
     new="$(git ls-files | grep -vE '^(\.gitignore|manifest\.txt)$' | sort -u)"
     old=""
     [[ -f "$m" ]] && old="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$m" | sed -E 's/^(keep|hook) //' | sort -u)"
-    # Rewrite (atomic): header, then each path with its flag (only bin/watchman is +x today).
-    {
-        printf '%s\n\n' "$header"   # blank line between header and entries
-        while IFS= read -r p; do
-            [[ -n "$p" ]] || continue
-            case "$p" in
-                bin/watchman) printf 'hook %s\n' "$p" ;;
-                *)            printf '%s\n' "$p" ;;
-            esac
-        done <<< "$new"
-    } > "$m.tmp" && mv -f "$m.tmp" "$m"
     added="$(comm -13 <(printf '%s\n' "$old") <(printf '%s\n' "$new") | grep -v '^$' || true)"
     removed="$(comm -23 <(printf '%s\n' "$old") <(printf '%s\n' "$new") | grep -v '^$' || true)"
-    if [[ -z "$added" && -z "$removed" ]]; then
+    # Flag drift is a rewrite trigger too: install.sh only chmods hook-flagged
+    # entries, so a manifest that lost its `hook bin/watchman` prefix ships a CLI
+    # that fetches non-executable. Compare the FLAGGED entry sets (order-blind, so
+    # a hand-grouped manifest still counts as in sync), not just the bare paths.
+    local flags_ok=yes old_flagged new_flagged
+    old_flagged="$([[ -f "$m" ]] && grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$m" | sort -u || true)"
+    new_flagged="$(while IFS= read -r p; do
+        [[ -n "$p" ]] || continue
+        case "$p" in bin/watchman) printf 'hook %s\n' "$p" ;; *) printf '%s\n' "$p" ;; esac
+    done <<< "$new" | sort -u)"
+    [[ "$old_flagged" == "$new_flagged" ]] || flags_ok=no
+    if [[ -z "$added" && -z "$removed" && "$flags_ok" == yes ]]; then
+        # Set and flags unchanged → touch nothing. The committed manifest may be
+        # hand-grouped rather than sort-order; rewriting it here would churn the
+        # file while claiming "already in sync".
         echo "update --sync: manifest.txt already in sync ($(printf '%s\n' "$new" | grep -c .) files)."
     else
+        [[ "$flags_ok" == no && -z "$added" && -z "$removed" ]] && \
+            echo "update --sync: entry flags drifted (keep/hook) — repairing manifest.txt."
+        # Rewrite (atomic): header, then each path with its flag (only bin/watchman is +x today).
+        {
+            printf '%s\n\n' "$header"   # blank line between header and entries
+            while IFS= read -r p; do
+                [[ -n "$p" ]] || continue
+                case "$p" in
+                    bin/watchman) printf 'hook %s\n' "$p" ;;
+                    *)            printf '%s\n' "$p" ;;
+                esac
+            done <<< "$new"
+        } > "$m.tmp" && mv -f "$m.tmp" "$m"
         echo "update --sync: regenerated manifest.txt ($(printf '%s\n' "$new" | grep -c .) files)."
         [[ -n "$added" ]]   && { echo "  + now shipped:";   sed 's/^/      /' <<< "$added"; }
         [[ -n "$removed" ]] && { echo "  - no longer shipped:"; sed 's/^/      /' <<< "$removed"; }

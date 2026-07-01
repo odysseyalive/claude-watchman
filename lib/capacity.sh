@@ -34,13 +34,20 @@ capacity_top_consumers() {
     # The find (the heavy part) is io_run-priced when io-courtesy is in scope; the
     # sort/head are negligible. head closing the pipe early is fine — command
     # substitution still captures what flowed through.
+    # BSD/macOS find has no -printf; there `stat -f` with a literal tab in the
+    # format emits the same "<bytes>\t<path>" lines (`-exec +` batches the forks).
     local raw
+    local -a findcmd=(find "$mp" -xdev -type f -size "$floor" -printf '%s\t%p\n')
+    [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] && \
+        findcmd=(find "$mp" -xdev -type f -size "$floor" -exec stat -f $'%z\t%N' {} +)
+    # `|| true`: when head exits early, find/sort take SIGPIPE (rc 141), which under
+    # the dispatcher's pipefail would kill this function exactly on the big-file
+    # mounts where its output matters most. The command substitution still captures
+    # everything head passed through; the guard only masks the pipe status.
     if command -v io_run >/dev/null 2>&1; then
-        raw="$(io_run find "$mp" -xdev -type f -size "$floor" -printf '%s\t%p\n' 2>/dev/null \
-               | sort -rn | head -n "$n")"
+        raw="$(io_run "${findcmd[@]}" 2>/dev/null | sort -rn | head -n "$n")" || true
     else
-        raw="$(find "$mp" -xdev -type f -size "$floor" -printf '%s\t%p\n' 2>/dev/null \
-               | sort -rn | head -n "$n")"
+        raw="$("${findcmd[@]}" 2>/dev/null | sort -rn | head -n "$n")" || true
     fi
     [[ -n "$raw" ]] || return 0
 

@@ -47,10 +47,14 @@ shellhist_scan() {
     # abnormal. lastlog is sparse (0 is common on minimal systems) and btmp is
     # empty when there are no failed logins (a good thing); neither is a tamper
     # signal on its own.
+    # macOS keeps login accounting in utmpx/ASL, not a flat wtmp — its absence
+    # there is by design, not a wiped trail. Skip the wtmp check on Darwin.
     lf=/var/log/wtmp
-    if [[ -e "$lf" ]]; then
-        sz="$(stat -c%s "$lf" 2>/dev/null || echo 0)"
-        if [[ "$sz" -eq 0 ]]; then
+    if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+        :
+    elif [[ -e "$lf" ]]; then
+        sz="$(_stat_size "$lf" 2>/dev/null || echo 0)"
+        if [[ "${sz:-0}" -eq 0 ]]; then
             _sh_emit security high manual login_record_wiped "$lf" \
                 "Login record $lf is empty" \
                 "$lf is 0 bytes — login history appears wiped (a common post-compromise step). On a minimal/container host with no login accounting this can be benign; confirm." \
@@ -87,14 +91,15 @@ shellhist_scan() {
             fi
             [[ -f "$hf" ]] || continue
             found_hist=yes
-            sz="$(stat -c%s "$hf" 2>/dev/null || echo 0)"
-            mode="$(stat -c%a "$hf" 2>/dev/null)"
-            owner="$(stat -c%U "$hf" 2>/dev/null)"
-            # world/group access on a history file (should be 600)
-            if [[ -n "$mode" && "${mode: -1}" -gt 0 ]]; then
+            sz="$(_stat_size "$hf" 2>/dev/null || echo 0)"
+            mode="$(_stat_perm "$hf" 2>/dev/null)"
+            owner="$(_stat_owner "$hf" 2>/dev/null)"
+            # world/group access on a history file (should be 600) — check BOTH of
+            # the last two octal digits (mode 640/660 is group-readable exposure).
+            if [[ -n "$mode" && ( "${mode: -1}" -gt 0 || "${mode: -2:1}" -gt 0 ) ]]; then
                 _sh_emit integrity low review shell_history_perms "$user" \
-                    "Shell history is accessible to others (mode $mode)" \
-                    "$hf is mode $mode — others can read $user's command history." \
+                    "Shell history is accessible to group/others (mode $mode)" \
+                    "$hf is mode $mode — users besides $user can read this command history." \
                     "chmod 600 $hf"
             fi
             [[ -n "$owner" && "$owner" != "$user" ]] && _sh_emit integrity medium manual shell_history_owner "$user" \
@@ -115,7 +120,7 @@ shellhist_scan() {
             local biggest=0 s
             for hf in "$home/.bash_history" "$home/.zsh_history" "$home/.sh_history"; do
                 [[ -f "$hf" ]] || continue
-                s="$(stat -c%s "$hf" 2>/dev/null || echo 0)"; (( s > biggest )) && biggest="$s"
+                s="$(_stat_size "$hf" 2>/dev/null || echo 0)"; s="${s:-0}"; (( s > biggest )) && biggest="$s"
             done
             if [[ "$found_hist" == no || "$biggest" -eq 0 ]]; then
                 _sh_emit integrity medium manual shell_history_login_gap "$user" \

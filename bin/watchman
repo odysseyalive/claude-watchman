@@ -51,8 +51,21 @@ set -euo pipefail
 
 _self="${BASH_SOURCE[0]}"
 # Resolve symlinks so /usr/local/bin/watchman → repo/bin/watchman finds the repo.
+# `readlink -f` is GNU/macOS-12.3+; fall back to a hop loop where it fails (BSD,
+# older macOS) — a bare failing command-sub here would kill the CLI under set -e.
 if [[ -L "$_self" ]] && command -v readlink >/dev/null 2>&1; then
-    _self="$(readlink -f "$_self")"
+    if _rl="$(readlink -f "$_self" 2>/dev/null)" && [[ -n "$_rl" ]]; then
+        _self="$_rl"
+    else
+        _hops=0
+        while [[ -L "$_self" && $_hops -lt 8 ]]; do
+            _rl="$(readlink "$_self")" || break
+            [[ "$_rl" = /* ]] || _rl="$(cd "$(dirname "$_self")" && pwd)/$_rl"
+            _self="$_rl"; _hops=$(( _hops + 1 ))
+        done
+        unset _hops
+    fi
+    unset _rl
 fi
 WATCHMAN_BIN_DIR="$(cd "$(dirname "$_self")" && pwd)"
 export WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$WATCHMAN_BIN_DIR/.." && pwd)}"
@@ -63,6 +76,7 @@ usage() {
 watchman — claude-watchman shell CLI. Zero-token, bash-only verbs:
 
   watchman selfcheck   Direct bash plumbing check (NO Claude) — run this FIRST on any new host.
+                       Also self-repairs .claude/settings.json (defaultMode + deny base) if drifted.
   watchman preflight   Regenerate the Claude permission profiles + in-session commands (NO Claude).
   watchman update      Re-fetch the latest product from the manifest (NO git) + regenerate
                        locals. Same command as installing; never touches your local state.

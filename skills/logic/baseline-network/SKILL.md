@@ -44,6 +44,12 @@ reads the baseline; it does not rewrite it.
 3. **Establish vs compare.**
    - If `$BASELINE` does **not** exist → write the snapshot to it. This is the
      skill's own state artifact (like the journal), not a destructive overwrite.
+     (This file write is why baseline-network is the one logic skill granted
+     `Write` — a deliberate exception; it touches nothing but its own artifact.)
+     If you record a baseline-establishment note in the journal, its identity is
+     fixed: `journal_upsert` with `category=config`, `check_id=network_baseline_established`,
+     `target=""` (the check_id alone identifies it — never slug a hostname, count,
+     or date into `target`, which would duplicate the finding on re-baseline).
    - If it **does** exist → **do not overwrite it** in the unattended loop. Diff the
      current snapshot against it; emit nothing here (the comparison is reported by
      `inspect-logs`/`correlate-findings`). Re-baselining (overwriting) is an

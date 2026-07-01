@@ -52,12 +52,62 @@ watchman_detect_family() {
     printf '%s\n' "$f"
 }
 
+# The kernel name never changes mid-process; cache it once at source time so the
+# stat helpers below (called in per-file/per-user loops) don't fork uname each call.
+_WM_UNAME="${_WM_UNAME:-$(uname -s 2>/dev/null || true)}"
+
 # _stat_mtime <file> — portable mtime in seconds (Linux vs macOS stat syntax).
 _stat_mtime() {
-    case "$(uname -s 2>/dev/null)" in
+    case "$_WM_UNAME" in
         Darwin) stat -f%m "$1" 2>/dev/null ;;
         *)      stat -c%Y "$1" 2>/dev/null ;;
     esac
+}
+
+# Portable stat fields, same Linux-vs-BSD split as _stat_mtime. Engines must use
+# these instead of raw `stat -c` (GNU-only: empty output on macOS silently turns
+# a present file into "0 bytes" and manufactures false findings).
+# _stat_size <file>  — size in bytes.
+_stat_size() {
+    case "$_WM_UNAME" in
+        Darwin) stat -f%z "$1" 2>/dev/null ;;
+        *)      stat -c%s "$1" 2>/dev/null ;;
+    esac
+}
+# _stat_perm <file> — octal permissions (e.g. 644).
+_stat_perm() {
+    case "$_WM_UNAME" in
+        Darwin) stat -f%Lp "$1" 2>/dev/null ;;
+        *)      stat -c%a "$1" 2>/dev/null ;;
+    esac
+}
+# _stat_owner <file> — owning user name.
+_stat_owner() {
+    case "$_WM_UNAME" in
+        Darwin) stat -f%Su "$1" 2>/dev/null ;;
+        *)      stat -c%U "$1" 2>/dev/null ;;
+    esac
+}
+# _stat_inode <file> — inode number (webstats uses it to detect log rotation).
+_stat_inode() {
+    case "$_WM_UNAME" in
+        Darwin) stat -f%i "$1" 2>/dev/null ;;
+        *)      stat -c%i "$1" 2>/dev/null ;;
+    esac
+}
+
+# ca_bundle_path — the system CA bundle for TLS clients (msmtp's tls_trust_file).
+# First existing path wins: Debian/Arch, RHEL, then macOS/LibreSSL. Returns 1 with
+# no output when none is found — callers omit the trust line and let the tool's
+# built-in default apply rather than pointing TLS at a nonexistent file.
+ca_bundle_path() {
+    local p
+    for p in /etc/ssl/certs/ca-certificates.crt \
+             /etc/pki/tls/certs/ca-bundle.crt \
+             /etc/ssl/cert.pem; do
+        [[ -r "$p" ]] && { printf '%s\n' "$p"; return 0; }
+    done
+    return 1
 }
 
 # _darwin_brew_prefix — homebrew prefix; works on both Intel and Apple Silicon.
@@ -270,17 +320,39 @@ firewall_allow() {
     case "$(watchman_firewall_backend)" in
         pf)        echo "firewall_allow: pf rules are operator-authored anchor files; refusing to auto-generate. Add a rule to /etc/pf.anchors/watchman and load with: sudo pfctl -f /etc/pf.conf" >&2; return 3 ;;
         ufw)       sudo ufw allow "$spec" ;;
-        firewalld) sudo firewall-cmd --permanent --add-port="${spec/\//\/}" && sudo firewall-cmd --reload ;;
+        firewalld) sudo firewall-cmd --permanent --add-port="$spec" && sudo firewall-cmd --reload ;;
         nftables)  echo "firewall_allow: nftables changes are operator-authored; refusing to guess a rule." >&2; return 3 ;;
         *) return 2 ;;
     esac
 }
+# firewall_deny takes TWO spec shapes, because its callers need both:
+#   * PORT/proto (e.g. 443/tcp)   — close/deny a port;
+#   * IP or CIDR (e.g. 1.2.3.4/32, 2001:db8::/64) — block a source address. This is
+#     the shape inspect-logs' request_rate_spike remediation proposes, and it needs a
+#     different rule form on every backend (`ufw deny from`, a firewalld rich rule).
+_fw_spec_is_addr() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ || "$1" == *:*:* ]]; }
 firewall_deny() {  # MUTATING — review-tier
-    local spec="$1"
+    local spec="$1" fam=ipv4
     case "$(watchman_firewall_backend)" in
         pf)        echo "firewall_deny: pf rules are operator-authored anchor files; refusing to auto-generate. See /etc/pf.anchors/watchman." >&2; return 3 ;;
-        ufw)       sudo ufw deny "$spec" ;;
-        firewalld) sudo firewall-cmd --permanent --remove-port="$spec" && sudo firewall-cmd --reload ;;
+        ufw)
+            if _fw_spec_is_addr "$spec"; then
+                # insert 1: a block must precede any existing allow to take effect
+                sudo ufw insert 1 deny from "$spec"
+            else
+                sudo ufw deny "$spec"
+            fi ;;
+        firewalld)
+            if _fw_spec_is_addr "$spec"; then
+                [[ "$spec" == *:* ]] && fam=ipv6
+                sudo firewall-cmd --permanent --add-rich-rule="rule family='$fam' source address='$spec' drop" && sudo firewall-cmd --reload
+            else
+                # NOTE: for a port spec this REVOKES a prior allow (--remove-port);
+                # firewalld's default zone already drops unopened ports, so revoking
+                # the allow is the semantic equivalent — but a port that was never
+                # allowed is a no-op, not a new block.
+                sudo firewall-cmd --permanent --remove-port="$spec" && sudo firewall-cmd --reload
+            fi ;;
         nftables)  echo "firewall_deny: nftables changes are operator-authored; refusing to guess a rule." >&2; return 3 ;;
         *) return 2 ;;
     esac

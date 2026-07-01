@@ -80,4 +80,12 @@ if [[ "$_WM_MUTATORS" == *" $fn "* && "${WM_APPLY:-}" != 1 ]]; then
     exit 3
 fi
 
+# Each dispatch is a fresh process, so journal.sh's "call journal_init once at the
+# top of any entry point" falls to us: self-heal a missing findings.db before any
+# journal write instead of failing on a missing table. Idempotent and cheap for
+# reads too, but scoped to journal_* to keep non-journal dispatches zero-touch.
+if [[ "$fn" == journal_* && "$(type -t journal_init || true)" == function ]]; then
+    journal_init || exit 1
+fi
+
 "$fn" "$@"

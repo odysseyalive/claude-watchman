@@ -138,7 +138,11 @@ forum hearsay, and prefer current pages over stale ones. Then:
    delete/overwrite a file, modify a database, sever access, or stop/remove a
    service/package → STOP, WARN in plain language, ASK. Proceed only on explicit
    per-action consent. (Backing up a file you are about to edit is good practice;
-   deleting one is destructive.)
+   deleting one is destructive.) The prune pair is this clause by name, not just a
+   `review` tier: `journal_prune` deletes findings-DB rows (the Prime Directive's
+   destructive-database case — it backs up findings.db first) and
+   `retention_prune_files` deletes watchman's own old backups/state files; both
+   demand the full stop-warn-ask, with the exact deletion windows shown.
 6. **Verify, then journal.** After applying, verify the fix actually took (re-read
    the config / re-list the rule), then `bash lib/wm journal_set_status <fp> fixed "<note>"`.
    If verification fails, leave it `open` and say so.

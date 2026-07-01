@@ -62,9 +62,29 @@ send_report() {
     local port="${SMTP_PORT:-587}" tls_line="tls on" tls_starttls="tls_starttls on"
     [[ "$port" == "465" ]] && tls_starttls="tls_starttls off"   # implicit TLS
 
-    # mode-600 temp config so the password never lands in a world-readable file.
-    local cfg; cfg="$(mktemp)"; chmod 600 "$cfg"
-    cat >"$cfg" <<EOF
+    # System CA bundle via the distro resolver (the path differs per family — the
+    # Debian one does not exist on RHEL/macOS). When smtp.sh was sourced standalone
+    # (bin/watchman testmail), pull in the resolver rather than duplicating its path
+    # list here. No bundle found → omit tls_trust_file and let msmtp's built-in
+    # default apply rather than pointing TLS at a missing file.
+    # shellcheck source=lib/distro.sh
+    declare -F ca_bundle_path >/dev/null || source "$_SMTP_LIB_DIR/distro.sh"
+    local trust trust_line=""
+    trust="$(ca_bundle_path || true)"
+    [[ -n "$trust" ]] && trust_line="tls_trust_file $trust"
+
+    # The whole send runs in a subshell that owns the mode-600 temp config: its EXIT
+    # trap (with INT/TERM routed through exit) removes the password-bearing file on
+    # success, failure, and interrupt alike — and no trap leaks into the sourcing
+    # shell (a RETURN trap set here would re-fire, with cfg unbound, on the next
+    # `source` completion in this process).
+    local rc=0
+    (
+        cfg="$(mktemp)" || exit 1
+        chmod 600 "$cfg"
+        trap 'rm -f "$cfg"' EXIT
+        trap 'exit 130' INT TERM
+        cat >"$cfg" <<EOF
 account watchman
 host ${SMTP_HOST}
 port ${port}
@@ -74,20 +94,18 @@ password ${SMTP_PASS}
 from ${SMTP_USER}
 ${tls_line}
 ${tls_starttls}
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
+${trust_line}
 account default : watchman
 EOF
+        {
+            printf 'From: %s\n' "$SMTP_USER"
+            printf 'To: %s\n' "$REPORT_EMAIL"
+            printf 'Subject: %s\n' "$subject"
+            printf 'Content-Type: text/plain; charset=UTF-8\n\n'
+            if [[ -n "$body_file" && -r "$body_file" ]]; then cat "$body_file"; else cat; fi
+        } | msmtp --file="$cfg" "$REPORT_EMAIL"
+    ) || rc=$?
 
-    local rc=0
-    {
-        printf 'From: %s\n' "$SMTP_USER"
-        printf 'To: %s\n' "$REPORT_EMAIL"
-        printf 'Subject: %s\n' "$subject"
-        printf 'Content-Type: text/plain; charset=UTF-8\n\n'
-        if [[ -n "$body_file" && -r "$body_file" ]]; then cat "$body_file"; else cat; fi
-    } | msmtp --file="$cfg" "$REPORT_EMAIL" || rc=$?
-
-    rm -f "$cfg"
     if (( rc != 0 )); then
         echo "smtp: msmtp exited $rc — report not delivered." >&2
         return "$rc"

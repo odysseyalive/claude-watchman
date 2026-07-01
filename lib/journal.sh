@@ -51,12 +51,14 @@ EOF
 
 # Serialize writes behind an flock so two processes never write at once. The lock
 # is advisory and process-scoped; readers are unaffected (WAL allows concurrent reads).
+# The if/else rc capture (not `cmd; rc=$?`) is load-bearing: this library is sourced
+# into set -e entrypoints (lib/wm, bin/watchman), where a bare failing command would
+# abort the function HERE and skip the lock release below.
 _journal_write() {
-    local sql="$1"
+    local sql="$1" rc=0
     exec 9>"$_JOURNAL_LOCK"
     flock 9
-    _journal_sqlite "$sql"
-    local rc=$?
+    if _journal_sqlite "$sql"; then rc=0; else rc=$?; fi
     flock -u 9
     exec 9>&-
     return $rc
@@ -158,14 +160,14 @@ journal: metrics rows >${mdays}d, and runs rows >${rdays}d, then VACUUMs. Active
 journal: findings (open/regressed/in-review) are NEVER pruned. Backing up first.
 EOF
     journal_backup "pre-prune"
+    local rc=0
     _journal_write "
 DELETE FROM findings
   WHERE status IN ('fixed','ignored')
     AND last_seen_at < datetime('now','-$fdays days');
 DELETE FROM metrics WHERE recorded_at < datetime('now','-$mdays days');
 DELETE FROM runs    WHERE started_at  < datetime('now','-$rdays days');
-VACUUM;"
-    local rc=$?
+VACUUM;" || rc=$?
     (( rc == 0 )) && echo "journal: prune complete (database vacuumed)." >&2 \
                   || echo "journal: prune FAILED (rc=$rc) — the pre-prune backup is intact." >&2
     return $rc
@@ -249,9 +251,17 @@ journal_set_status() {
 }
 
 # Record a point in a tracked time series (e.g. Lynis hardening index).
+# `value` is spliced into SQL unquoted, so it must BE a number — reject anything
+# else loudly rather than hand sqlite a syntax error (or worse, stray SQL).
 journal_record_metric() {
     local name; name="$(_sql_escape "$1")"
     local value="$2"
+    # Accept everything sqlite stores as a number: sign, leading/trailing dot,
+    # scientific notation ('.5', '5.', '+7', '1e3') — reject only non-numbers.
+    [[ "$value" =~ ^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$ ]] || {
+        echo "journal_record_metric: value must be numeric, got '$value'" >&2
+        return 2
+    }
     _journal_write "INSERT INTO metrics(name, value) VALUES('$name', $value);"
 }
 
@@ -262,6 +272,10 @@ journal_run_start() {
 }
 journal_run_finish() {
     local id="$1" summary; summary="$(_sql_escape "${2:-}")"
+    [[ "$id" =~ ^[0-9]+$ ]] || {
+        echo "journal_run_finish: id must be a row id, got '$id'" >&2
+        return 2
+    }
     _journal_write "UPDATE runs SET finished_at=datetime('now'), summary='$summary' WHERE id=$id;"
 }
 

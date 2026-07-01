@@ -372,15 +372,18 @@ _sched_installed_version() {
 # version is OLDER than this code's generator (SCHED_UNIT_VERSION) — or carries no stamp at
 # all (a pre-v2, HOME/PATH-broken install) — print a loud one-line notice naming the
 # one-command repair. Prints nothing when nothing is installed or it is already current.
-# Returns 0 when drift was reported, 1 otherwise. It NEVER rewrites the on-disk trigger: an
+# Always returns 0 (stderr is its whole interface). It NEVER rewrites the on-disk trigger: an
 # installed unit is machine state, so healing it stays an operator-confirmed `schedule
 # install` (which is idempotent and re-stamps to the current version). This is the hook
 # `watchman update` calls to warn an updating operator that their LIVE trigger is now stale.
 schedule_drift_notice() {
+    # Always returns 0: it communicates via stderr only. A 0/1 "was there drift"
+    # status would force `|| true` at every set -e call site and reintroduce the
+    # exit-1-on-healthy-trigger bug the moment a caller forgets it.
     local iv label
     iv="$(_sched_installed_version)"
-    [[ -z "$iv" ]] && return 1                    # nothing installed
-    (( iv >= SCHED_UNIT_VERSION )) && return 1    # current — no drift
+    [[ -z "$iv" ]] && return 0                    # nothing installed
+    (( iv >= SCHED_UNIT_VERSION )) && return 0    # current — no drift
     # An unstamped trigger (iv==0) is the original pre-fix shape; call it "v1 (unstamped)".
     (( iv == 0 )) && label="v1 (unstamped, pre-fix)" || label="v${iv}"
     echo "watchman schedule: STALE TRIGGER — the installed headless schedule is ${label}, but this" >&2
@@ -412,7 +415,7 @@ schedule_status() {
     schedule_ledger_summary >&2
     # Drift check last, so the STALE-TRIGGER warning + repair command are the final thing
     # the operator sees (and it sits right under any is_error runs the ledger just reported).
-    (( found )) && schedule_drift_notice
+    if (( found )); then schedule_drift_notice; fi
     return 0
 }
 

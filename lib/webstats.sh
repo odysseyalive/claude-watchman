@@ -98,7 +98,7 @@ webstats_cat_logs_incremental() {
     tmp="$(mktemp)"
     while IFS= read -r f; do
         [[ -f "$f" ]] || continue
-        inode="$(stat -c%i "$f" 2>/dev/null)"; size="$(stat -c%s "$f" 2>/dev/null)"
+        inode="$(_stat_inode "$f" 2>/dev/null)"; size="$(_stat_size "$f" 2>/dev/null)"
         [[ -n "$inode" && -n "$size" ]] || continue
         start=0
         if [[ "${OFF_INODE[$f]:-}" == "$inode" && -n "${OFF_SIZE[$f]:-}" && "$size" -ge "${OFF_SIZE[$f]}" ]]; then
@@ -125,6 +125,9 @@ _webstats_awk() {
     function mnum(m){ return (index("JanFebMarAprMayJunJulAugSepOctNovDec", m)-1)/3 + 1 }
     {
         # Portable combined/common-log parse by splitting on the quote char.
+        # Caveat: an escaped \" inside the request/referrer/UA adds spurious
+        # fields and can shift q[6] — acceptable for this heuristic stats path,
+        # NOT a parser to build enforcement on.
         n = split($0, q, "\"")
         if (n < 3) next
         split(q[1], h, " ")
