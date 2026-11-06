@@ -55,8 +55,22 @@ fi
 # everything lands in a temp dir first and is moved into place only after ALL
 # files succeed, so a dropped connection can never leave a half-updated tree.
 # `keep`-flagged files are fetched only if absent; `hook` files get +x.
+#
+# LOCAL CHANGES ARE NEVER LOST. Overwriting is destructive, so any product file that
+# would change and is not byte-identical to what the last fetch installed is first copied
+# to journal/pre-update-backup-<stamp>/ and named in a warning. "What the last fetch
+# installed" is journal/product-checksums.txt, rewritten by every fetch. With no recorded
+# checksum (a first run, or no sha tool) an upstream change and a local edit look the same,
+# so the file is backed up rather than guessed about.
+_watchman_sha() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
 _watchman_fetch() {
-    local dest="$1" tmp line flag path
+    local dest="$1" tmp line flag path recorded local_sha new_sha
+    local baseline="$dest/journal/product-checksums.txt"
+    local backup="$dest/journal/pre-update-backup-$(date +%Y%m%d-%H%M%S)-$$"
     command -v curl >/dev/null 2>&1 || { echo "install: curl is required to fetch claude-watchman." >&2; exit 1; }
     tmp="$(mktemp -d)" || { echo "install: mktemp failed." >&2; exit 1; }
     echo "==> fetching claude-watchman ($WATCHMAN_REF) → $dest" >&2
@@ -72,18 +86,47 @@ _watchman_fetch() {
         curl -fsSL "$WATCHMAN_RAW/$path" -o "$tmp/$path" \
             || { echo "install: fetch failed for $path" >&2; rm -rf "$tmp"; exit 1; }
     done < "$tmp/manifest.txt"
-    # Phase 2 — move into place (only now), and keep the manifest on disk so
+    # Phase 2 — back up local changes BEFORE anything moves, so a failed backup aborts
+    # with the installed tree untouched.
+    local backed_up="" n_backed=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|\#*) continue ;; esac
+        path="$line"
+        case "$line" in "keep "*) path="${line#keep }" ;; "hook "*) path="${line#hook }" ;; esac
+        [ -f "$tmp/$path" ] && [ -f "$dest/$path" ] || continue
+        cmp -s "$tmp/$path" "$dest/$path" && continue
+        recorded=""
+        [ -f "$baseline" ] && recorded="$(awk -v p="$path" '$2==p{print $1; exit}' "$baseline")"
+        local_sha="$(_watchman_sha "$dest/$path")"
+        [ -n "$recorded" ] && [ "$recorded" = "$local_sha" ] && continue   # untouched since last fetch
+        mkdir -p "$backup/$(dirname "$path")" && cp -p "$dest/$path" "$backup/$path" \
+            || { echo "install: could not back up $path — aborting, nothing was overwritten." >&2; rm -rf "$tmp"; exit 1; }
+        backed_up="$backed_up    $path"$'\n'; n_backed=$((n_backed+1))
+    done < "$tmp/manifest.txt"
+    if [ "$n_backed" -gt 0 ]; then
+        echo "install: WARNING — $n_backed product file(s) may hold local changes. Copies saved to:" >&2
+        echo "    $backup" >&2
+        printf '%s' "$backed_up" >&2
+        [ -f "$baseline" ] || echo "    (No checksum record yet, so upstream changes are listed here too. Later updates will only list real local edits.)" >&2
+        echo "    Compare with: diff -ru $backup $dest" >&2
+    fi
+    # Phase 3 — move into place (only now), and keep the manifest on disk so
     # `watchman update --check` can verify it stays in lockstep with the product.
+    mkdir -p "$dest/journal"
+    : > "$tmp/.checksums"
     cp "$tmp/manifest.txt" "$dest/manifest.txt"
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in ''|\#*) continue ;; esac
         flag=""; path="$line"
         case "$line" in "keep "*) flag=keep; path="${line#keep }" ;; "hook "*) flag=hook; path="${line#hook }" ;; esac
         [ -f "$tmp/$path" ] || continue            # keep-skipped file
+        new_sha="$(_watchman_sha "$tmp/$path")"
+        [ -n "$new_sha" ] && printf '%s  %s\n' "$new_sha" "$path" >> "$tmp/.checksums"
         mkdir -p "$dest/$(dirname "$path")"
         mv -f "$tmp/$path" "$dest/$path"
-        [ "$flag" = hook ] && chmod +x "$dest/$path"
+        if [ "$flag" = hook ]; then chmod +x "$dest/$path"; fi
     done < "$tmp/manifest.txt"
+    mv -f "$tmp/.checksums" "$baseline"
     rm -rf "$tmp"
 }
 
@@ -300,6 +343,10 @@ fi
 GI="$ROOT/.gitignore"
 if [[ -f "$GI" ]] && grep -q 'claude-watchman — never commit these' "$GI"; then
     say ".gitignore already carries the claude-watchman block"
+    # The block is only appended once, so entries added in later releases are topped up here.
+    for _gi in journal/liveness-alert.state journal/product-checksums.txt 'journal/pre-update-backup-*/'; do
+        grep -qxF "$_gi" "$GI" || printf '%s\n' "$_gi" >> "$GI"
+    done
 else
     say "Appending claude-watchman block to .gitignore"
     cat >> "$GI" <<'EOF'
@@ -322,6 +369,9 @@ journal/monitor-state/
 journal/run-ledger.tsv
 journal/run.log
 journal/.write.lock
+journal/liveness-alert.state
+journal/product-checksums.txt
+journal/pre-update-backup-*/
 
 # preflight staging + scratch
 .watchman-sudoers.staged

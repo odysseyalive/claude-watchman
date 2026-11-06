@@ -16,6 +16,16 @@ WATCHMAN_NOTIFY_MIN_SEVERITY=high   # email when a NEW finding is >= this severi
 WATCHMAN_NOTIFY_ON_REGRESSION=yes   # always email when a fixed finding REGRESSES
 WATCHMAN_NOTIFY_ON_NEW_OUTBOUND=yes # (workstation) email on new outbound destinations
 
+# --- Headless pass health (these alerts ignore WATCHMAN_NOTIFY_MIN_SEVERITY) ---
+# Every `watchman run` is checked when it ends, and mailed about if unhealthy: non-zero exit,
+# is_error from claude, output below these floors, or no journal run row closed during the pass.
+WATCHMAN_RUN_MIN_OUTPUT_TOKENS=2000 # a pass producing fewer output tokens than this is unhealthy
+WATCHMAN_RUN_MIN_TURNS=5            # a pass taking fewer turns than this is unhealthy
+# `watchman liveness` runs on its own trigger, and mails once per outage. Alerts when the newest
+# pass is older than the installed cadence times this factor, or when passes keep failing.
+WATCHMAN_LIVENESS_FACTOR=1.5
+WATCHMAN_LIVENESS_FAILED_PASSES=1   # alert after this many consecutive is_error passes
+
 # --- Capacity baselines -----------------------------------------------------
 WATCHMAN_DISK_WARN_PCT=85           # disk usage % that raises a capacity finding
 WATCHMAN_DISK_CRIT_PCT=95           # disk usage % that is DANGEROUSLY low: escalates the finding to critical (red)

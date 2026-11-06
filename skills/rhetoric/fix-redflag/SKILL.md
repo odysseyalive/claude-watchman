@@ -11,8 +11,8 @@ Remediates findings and updates their status. This is the only skill that change
 system state, so the Prime Directive governs it most directly: its destructive-action
 gate **is** the Prime Directive, layered on top of — never instead of — the risk
 tiers. Operator-run only, in a FIX-profile session launched with `watchman fix`
-(`.claude/settings.fix.json`, "default" mode): safe-tier ops are pre-approved, every
-other mutating step prompts per finding, and the deny base still blocks destruction.
+(`.claude/settings.fix.json`, "default" mode): every mutating step prompts, and the
+deny base still blocks destruction.
 Its mutating commands are deliberately absent from the loop's `dontAsk` allowlist, so
 the unattended loop cannot apply them — only the operator-launched fix session can.
 

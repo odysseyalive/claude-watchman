@@ -217,6 +217,7 @@ vice-versa). When in doubt: no slash → your shell; slash → inside `claude`.
 | `watchman fix` | **Launcher** (spends nothing itself): opens a Claude session in the FIX profile and **auto-runs the fixer for you**. You don't type anything, you just confirm each change. |
 | `watchman dev` | **Launcher** for maintainers: opens a session in the DEV profile (repo-write, `acceptEdits`) for editing the source. |
 | `watchman schedule` | Install / remove / inspect the headless monitoring trigger (systemd timer or cron) for indefinite, unattended monitoring. `install [--every 6h] [--cron\|--systemd]`, `remove`, `status`. Install/remove are operator-confirmed system changes. |
+| `watchman liveness` | The watchdog: alerts by email when headless passes stop or keep failing, from its own trigger, spending no tokens. Bare verb runs one check; `install [--every 1h] [--cron\|--systemd]`, `remove`, `status`. Install/remove are operator-confirmed system changes. |
 | `watchman run` | The one token-spending shell verb: run ONE headless loop pass (what the schedule fires). Read-only like the loop; logs its token cost to the ledger. Normally fired by the schedule, not by hand. |
 
 **In a Claude Code session**, AI features, visible token use (typed at the `claude` prompt, with the slash):
@@ -345,6 +346,24 @@ it by hand once to test it:
 ```bash
 watchman run
 ```
+
+Every headless pass is also checked when it ends. If it exited with an error, reported
+`is_error`, produced too little work, or never recorded a finished run in the journal, you get
+an email regardless of your severity threshold. `journal/run.log` records whether that email
+was sent, skipped, or failed.
+
+That check cannot help if passes stop running altogether, so install the watchdog as well. It
+runs on its own timer, spends no tokens, and emails once per outage when passes stop or keep
+failing:
+
+```bash
+watchman liveness install
+```
+
+`watchman update` never silently discards a local edit to a product file. It saves a copy under
+`journal/pre-update-backup-<stamp>/` first and names the file in a warning. The first update
+from an older version still runs that version's installer, so re-apply or save any local edits
+before it.
 
 For this to work headlessly, root must have logged into Claude once (`claude`, then
 `/login`) so `watchman run` can authenticate with no prompt.

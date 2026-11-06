@@ -163,11 +163,13 @@ _pf_expand_fix_op() {
         firewall_deny)   printf 'Bash(WM_APPLY=1 bash lib/wm firewall_deny:*)\t-\n' ;;
         service_enable)  printf 'Bash(WM_APPLY=1 bash lib/wm service_enable:*)\t-\n' ;;
         service_restart) printf 'Bash(WM_APPLY=1 bash lib/wm service_restart:*)\t-\n' ;;
-        config_edit)     # config files live under /etc; grant Edit (modify) + Write (create,
-                         # e.g. a new /etc/logrotate.d entry). Crown-jewel files stay denied
-                         # by the deny base (shadow / sudoers), which an allow cannot override.
-                         printf 'Edit(/etc/**)\t/etc\n'
-                         printf 'Write(/etc/**)\t/etc\n' ;;
+        config_edit)     # Deliberately NO allow rule. A blanket Edit(//etc/**) would apply every
+                         # /etc edit with no prompt, including review-tier files such as
+                         # sshd_config, because a rule cannot tell which finding an edit serves.
+                         # Default mode prompts for the edit instead. (The old Edit(/etc/**) form
+                         # was project-relative, so it never granted anything: this keeps the
+                         # behavior hosts already have.)
+                         : ;;
         *) echo "preflight: unknown fix_op '$op'" >&2 ;;
     esac
 }
@@ -218,8 +220,12 @@ preflight_collate() {
                 [[ -n "$path" ]] || continue
                 # If the path is a file, grant its dir; if a dir, grant it directly.
                 if [[ -d "$path" ]]; then dir="$path"; else dir="$(dirname "$path")"; fi
-                allow+=("Read(${dir}/**)")
-                adddirs+=("/${dir}")        # doubled leading slash (dir already starts with /)
+                # Two different path grammars, tested against Claude Code 2.1.318: a permission
+                # RULE needs // to mean absolute (a single / is relative to the settings source,
+                # so Read(/etc/**) grants nothing), while additionalDirectories takes a PLAIN
+                # path (//etc grants nothing). dir already starts with /.
+                allow+=("Read(/${dir}/**)")
+                adddirs+=("${dir}")
             done < <(_pf_resolve_read "$r")
         done < <(jq -r '.reads[]?' "$m" 2>/dev/null)
 
@@ -265,8 +271,7 @@ preflight_collate() {
 # the FIX profile grants ON TOP OF the read-only allowlist. TIER-AWARE: only
 # `safe`-tier ops are granted (they apply without a permission prompt); `review`
 # ops are deliberately omitted so "default" mode prompts per finding, and `manual`
-# is never granted. The dir convention mirrors preflight_collate's doubled leading
-# slash ("/${dir}" where dir already starts with /), so additionalDirectories match.
+# is never granted. Dirs are plain absolute paths, as in preflight_collate.
 _pf_collate_fix() {
     local -a allow=() dirs=()
     local m op tier rule dir
@@ -278,7 +283,7 @@ _pf_collate_fix() {
             while IFS=$'\t' read -r rule dir; do
                 [[ -n "$rule" ]] || continue
                 allow+=("$rule")
-                [[ -n "$dir" && "$dir" != "-" ]] && dirs+=("/${dir}")
+                [[ -n "$dir" && "$dir" != "-" ]] && dirs+=("${dir}")
             done < <(_pf_expand_fix_op "$op")
         done < <(jq -r '.fixes[]? | [.op, (.risk_tier // "manual")] | @tsv' "$m" 2>/dev/null)
     done < <(find "$WATCHMAN_ROOT/skills" -mindepth 3 -maxdepth 3 -name manifest.json 2>/dev/null | sort)
@@ -290,12 +295,26 @@ _pf_collate_fix() {
 # --- Deny base (the backstop, shared by ALL profiles) -----------------------
 # One declaration of the destructive-action denylist, emitted one rule per line.
 # Every generated profile (loop/fix/dev) embeds this verbatim so the backstop can
-# never drift between them. An allow can never override a deny, so even the fix
-# profile's Edit(/etc/**) grant cannot touch the crown-jewel files denied here.
+# never drift between them. An allow can never override a deny.
+#
+# Absolute paths MUST use the // form. A single leading slash is relative to the settings
+# source, so Edit(/etc/shadow) only ever matched <project>/etc/shadow; a test on Claude Code
+# 2.1.318 confirmed a single-slash deny does not block the real path. `update --check`
+# fails if a single-slash absolute path comes back.
+#
+# The Read denies exist because the loop's read grants (//etc, //root, //home, //var) are
+# real: credentials and private keys must stay out of a session whose transcript persists.
 _pf_deny_base() {
     printf '%s\n' \
         'Read(.env)' \
         'Read(./.env)' \
+        'Read(//etc/shadow)' \
+        'Read(//etc/gshadow)' \
+        'Read(//etc/ssh/ssh_host_*_key)' \
+        'Read(//root/.ssh/**)' \
+        'Read(//home/*/.ssh/**)' \
+        'Read(//root/.claude/.credentials.json)' \
+        'Read(//home/*/.claude/.credentials.json)' \
         'Bash(rm *)' \
         'Bash(rm -rf *)' \
         'Bash(sudo rm *)' \
@@ -313,14 +332,14 @@ _pf_deny_base() {
         'Bash(passwd *)' \
         'Bash(visudo *)' \
         'Bash(* /etc/sudoers*)' \
-        'Edit(/etc/shadow)' \
-        'Edit(/etc/gshadow)' \
-        'Edit(/etc/sudoers)' \
-        'Edit(/etc/sudoers.d/**)' \
-        'Write(/etc/shadow)' \
-        'Write(/etc/gshadow)' \
-        'Write(/etc/sudoers)' \
-        'Write(/etc/sudoers.d/**)'
+        'Edit(//etc/shadow)' \
+        'Edit(//etc/gshadow)' \
+        'Edit(//etc/sudoers)' \
+        'Edit(//etc/sudoers.d/**)' \
+        'Write(//etc/shadow)' \
+        'Write(//etc/gshadow)' \
+        'Write(//etc/sudoers)' \
+        'Write(//etc/sudoers.d/**)'
 }
 
 # --- Base policy (fixed, not manifest-derived) ------------------------------
@@ -431,9 +450,9 @@ preflight_write_dev_settings() {
     mkdir -p "$claude_dir"
     local deny root allow; deny="$(_pf_deny_base)"; root="$WATCHMAN_ROOT"
     allow="$(printf '%s\n' \
-        "Read(${root}/**)" \
-        "Edit(${root}/**)" \
-        "Write(${root}/**)" \
+        "Read(/${root}/**)" \
+        "Edit(/${root}/**)" \
+        "Write(/${root}/**)" \
         'Bash(bash lib/wm:*)' \
         'Bash(git *)' \
         'Bash(jq *)' \

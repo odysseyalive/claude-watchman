@@ -449,9 +449,12 @@ webserver_log_paths() {
 
     # ${APACHE_LOG_DIR} is set in Debian's envvars (default /var/log/apache2).
     local apache_log_dir=""
+    # Debian's value is literally /var/log/apache2$SUFFIX, so strip the bare $VAR form as
+    # well as ${VAR}. lib/wm runs under set -euo pipefail, where a grep that matches nothing
+    # would kill this whole function, hence the || true inside the substitution.
     [[ -r /etc/apache2/envvars ]] && apache_log_dir="$(
-        grep -hE 'APACHE_LOG_DIR=' /etc/apache2/envvars 2>/dev/null \
-            | tail -1 | sed -E 's/.*APACHE_LOG_DIR=//; s/\$\{[^}]*\}//g; s/["'\'' ]//g')"
+        { grep -hE 'APACHE_LOG_DIR=' /etc/apache2/envvars 2>/dev/null || true; } \
+            | tail -1 | sed -E 's/.*APACHE_LOG_DIR=//; s/\$\{[^}]*\}//g; s/\$[A-Za-z_][A-Za-z0-9_]*//g; s/["'\'' ]//g')"
     [[ -n "$apache_log_dir" ]] || apache_log_dir=/var/log/apache2
 
     _wlp_add() {  # record the dir holding a parsed log target; relies on dynamic scope
@@ -494,7 +497,8 @@ webserver_log_paths() {
                 [[ -n "$root" && -d "$root" ]] && aroots+=("$root")
                 for ar in /etc/apache2 /etc/httpd; do [[ -d "$ar" ]] && aroots+=("$ar"); done
                 for ar in "${aroots[@]}"; do
-                    sroot="$(grep -rhiE '^[[:space:]]*ServerRoot[[:space:]]+' "$ar" 2>/dev/null \
+                    # ServerRoot is commented out by default on Debian: no match is normal.
+                    sroot="$( { grep -rhiE '^[[:space:]]*ServerRoot[[:space:]]+' "$ar" 2>/dev/null || true; } \
                                 | tail -1 | awk '{print $2}' | tr -d '"')"
                     [[ -n "$sroot" ]] || sroot="$ar"
                     WLP_RELBASE="$sroot"
@@ -526,7 +530,7 @@ webserver_log_paths() {
     # Safety-net union: well-known dirs that actually exist on disk.
     # Includes macOS Homebrew var paths (both Intel /usr/local and Apple Silicon /opt/homebrew).
     local _bp=""
-    [[ "$(watchman_family)" == darwin ]] && _bp="$(_darwin_brew_prefix 2>/dev/null)"
+    [[ "$(watchman_family)" == darwin ]] && _bp="$(_darwin_brew_prefix 2>/dev/null || true)"
     for p in /var/log/nginx /var/log/apache2 /var/log/httpd /var/log/caddy /var/log/lighttpd \
               /usr/local/var/log/nginx /opt/homebrew/var/log/nginx \
               /usr/local/var/log/httpd /opt/homebrew/var/log/httpd; do

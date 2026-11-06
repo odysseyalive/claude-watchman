@@ -19,6 +19,7 @@
 #   watchman dev         LAUNCH a maintainer session in the DEV profile (acceptEdits).
 #   watchman run         Run ONE headless loop pass (for cron/systemd) + log its token cost.
 #   watchman schedule    Install/remove/inspect the recurring headless trigger (cron|systemd).
+#   watchman liveness    Alert when headless passes stop or keep failing (own trigger, no tokens).
 #
 # loop and inventory are NOT shell verbs. They run inside a Claude Code session as
 # `/watchman <verb>`, where you see the work and the token meter. Typing one of those
@@ -108,9 +109,9 @@ permission mode is fixed at session startup and cannot be changed from inside):
                        monitoring run (when it ran, what happened, and anything important
                        to know), written so a non-technical reader can follow it.
   watchman fix         LAUNCH a remediation session — FIX profile, "default" mode: every
-                       fix prompts per finding (the risk-tier confirmation), safe toggles
-                       are pre-approved, the destructive deny base is retained. The session
-                       opens already running /watchman fix — nothing to type.
+                       fix prompts (the risk-tier confirmation), and the destructive deny
+                       base is retained. The session opens already running /watchman fix —
+                       nothing to type.
   watchman dev         LAUNCH a maintainer session — DEV profile, acceptEdits: source edits
                        in the product tree auto-apply (no settings.json hand-edit + restart),
                        Bash still prompts, deny base retained.
@@ -140,6 +141,7 @@ Recurring monitoring — TWO cadences, pick one:
          watchman schedule install --every 6h     (operator-confirmed; reversible)
          watchman schedule status                 (trigger + token/cost ledger)
          watchman schedule remove                 (tear it back down)
+         watchman liveness install                (alert if passes stop or keep failing)
      Headless runs are read-only, exactly like the loop: they can apply no fixes.
 EOF
     exit "${1:-0}"
@@ -320,6 +322,42 @@ EOF
         esac
         ;;
 
+    liveness)
+        # The liveness watchdog: has its own trigger, because a check that rides on the
+        # monitoring loop cannot report that the loop has stopped. Zero tokens: it reads the
+        # run ledger and never invokes claude. The bare verb performs ONE check, which can send
+        # mail and writes journal/liveness-alert.state. install/remove are operator-confirmed
+        # system changes (Prime Directive stop-warn-ask).
+        # shellcheck source=lib/schedule.sh
+        source "$WATCHMAN_ROOT/lib/schedule.sh"
+        sub="${1:-}"
+        case "$sub" in
+            install) shift; schedule_liveness_install "$@" ;;
+            remove)  shift; schedule_liveness_remove "$@" ;;
+            status)  shift; schedule_liveness_status "$@" ;;
+            -h|--help|help)
+                cat >&2 <<'EOF'
+watchman liveness — alert when the monitoring loop STOPS running or its passes keep FAILING.
+The normal notify gate can only report findings from a pass that actually worked, so a dead
+timer or a lapsed login is invisible to it by construction.
+
+  watchman liveness [--quiet]
+        Run ONE check now. Compares the newest run-ledger timestamp against the INSTALLED
+        cadence x WATCHMAN_LIVENESS_FACTOR (default 1.5), and reads is_error on the newest
+        passes. Mails once per outage. Spends no tokens. Exits 1 while unhealthy.
+  watchman liveness install [--every <N>m|<N>h|<N>d] [--cron|--systemd]
+        Install the watchdog on its own trigger (default every 1h). Confirmed
+        system change; reversible with 'remove'.
+  watchman liveness remove
+        Stop and remove the watchdog. The monitoring loop itself is unaffected.
+  watchman liveness status
+        Show whether the watchdog is installed, and the current verdict. Never mails.
+EOF
+                exit 0 ;;
+            *) schedule_liveness_check "$@" ;;
+        esac
+        ;;
+
     loop|inventory) _redirect_to_session "$verb" ;;
 
     safe)
@@ -353,11 +391,11 @@ EOF
             "Run /watchman status" ;;
 
     fix)
-        # Operator-run remediation. Needs the FIX profile: "default" mode (per-finding
-        # prompts = the risk-tier confirmation) + the safe-tier mutating allowlist, with
-        # the destructive deny base retained. The loop's dontAsk session can't do this.
+        # Operator-run remediation. Needs the FIX profile: "default" mode (prompts = the
+        # risk-tier confirmation), with the destructive deny base retained. The loop's
+        # dontAsk session can't do this.
         _launch_session settings.fix.json default \
-            "remediation session — per-finding prompts, safe fixes pre-approved, destructive ops denied." \
+            "remediation session — every fix prompts, destructive ops denied." \
             "/watchman fix" "Run /watchman fix" ;;
 
     dev)

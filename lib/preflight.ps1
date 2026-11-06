@@ -227,6 +227,11 @@ function _pf_deny_base {
         'PowerShell(Reset-ComputerMachinePassword *)'
         'Edit(C:/Windows/System32/config/**)'
         'Write(C:/Windows/System32/config/**)'
+        # Claude Code normalizes Windows paths to POSIX form before matching, so the rule form
+        # its docs specify is //c/... The C:/ pair above is kept until this is confirmed on a
+        # real Windows host; a redundant deny is harmless.
+        'Edit(//c/Windows/System32/config/**)'
+        'Write(//c/Windows/System32/config/**)'
     )
 }
 

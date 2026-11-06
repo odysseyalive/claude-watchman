@@ -122,7 +122,9 @@ update_check_run() {
     for p in .env config/watchman.conf journal/findings.db journal/findings.db-wal \
              journal/findings.db-shm journal/network-baseline.txt journal/log-offsets.txt \
              journal/monitor-offsets.txt journal/monitor-state \
-             journal/run-ledger.tsv journal/run.log journal/.write.lock .claude CLAUDE.md; do
+             journal/run-ledger.tsv journal/run.log journal/.write.lock \
+             journal/liveness-alert.state journal/product-checksums.txt journal/pre-update-backup-x/ \
+             .claude CLAUDE.md; do
         if git check-ignore -q "$p"; then _uc_ok "ignored: $p"
         else _uc_fail "NOT gitignored: $p — it could be committed or clobbered"; fi
     done
@@ -182,6 +184,15 @@ update_check_run() {
     sv="$(grep -oiE 'user_version[^0-9]*[0-9]+' journal/schema.sql 2>/dev/null | grep -oE '[0-9]+' | head -1)"
     if [[ -n "$jv" && "$jv" == "$sv" ]]; then _uc_ok "schema version in sync (v$jv)"
     else _uc_fail "schema version mismatch — lib/journal.sh=v${jv:-?} vs journal/schema.sql=v${sv:-?}"; fi
+
+    # 7. Permission rule grammar. A single leading slash is relative to the settings source,
+    # so a deny written that way silently protects nothing; additionalDirectories takes a
+    # plain path. Comments are skipped so the explanation of the rule can name the bad form.
+    printf '\n7. Permission path grammar (rules use //, additionalDirectories plain)\n'
+    local badrules
+    badrules="$(grep -nE "(Read|Edit|Write)\(/[^/\$]|(adddirs|dirs)\+=\(\"/" lib/preflight.sh | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+    if [[ -z "$badrules" ]]; then _uc_ok "lib/preflight.sh emits only absolute // rules and plain directories"
+    else _uc_fail "single-slash permission rule or doubled directory in lib/preflight.sh:"$'\n'"$badrules"; fi
 
     printf '\n'
     if (( fail == 0 )); then

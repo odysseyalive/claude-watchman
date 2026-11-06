@@ -278,6 +278,13 @@ journal_run_finish() {
     }
     _journal_write "UPDATE runs SET finished_at=datetime('now'), summary='$summary' WHERE id=$id;"
 }
+# Count run rows CLOSED at or after a timestamp. Read-only. datetime() matters: finished_at is
+# stored as 'YYYY-MM-DD HH:MM:SS' UTC, and a plain text compare against an ISO time with a T
+# and an offset matches nothing. Used by the headless health gate (lib/schedule.sh).
+journal_runs_closed_since() {
+    local since; since="$(_sql_escape "$1")"
+    _journal_sqlite "SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL AND finished_at >= datetime('$since');"
+}
 
 # --- Read helpers (no writes) ----------------------------------------------
 # What journal_prune WOULD delete right now, given the configured windows. Read-only
