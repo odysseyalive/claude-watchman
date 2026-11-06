@@ -194,6 +194,15 @@ update_check_run() {
     if [[ -z "$badrules" ]]; then _uc_ok "lib/preflight.sh emits only absolute // rules and plain directories"
     else _uc_fail "single-slash permission rule or doubled directory in lib/preflight.sh:"$'\n'"$badrules"; fi
 
+    # 8. No manifest may declare a whole system tree as readable. What a session reads goes to
+    # the model provider, and a denylist cannot list an unknown host's secrets.
+    printf '\n8. Least-privilege reads (no manifest declares a whole system tree)\n'
+    local broad
+    broad="$(jq -r 'input_filename as $f | (.reads // [])[] | select(test("^/(etc|var|var/lib|var/log|home|root|usr|opt|srv)?/?$")) | "\($f): \(.)"' \
+              skills/*/*/manifest.json 2>/dev/null || true)"
+    if [[ -z "$broad" ]]; then _uc_ok "manifests declare only specific paths"
+    else _uc_fail "whole-tree read declared:"$'\n'"$broad"; fi
+
     printf '\n'
     if (( fail == 0 )); then
         echo "release-readiness: PASS — the update story holds; safe to commit."

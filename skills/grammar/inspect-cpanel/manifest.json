@@ -1,7 +1,7 @@
 {
   "skill": "inspect-cpanel",
   "stage": "grammar",
-  "reads": ["cpanel_log_paths", "/etc/cpupdate.conf", "/etc/csf", "/var/cpanel"],
+  "reads": ["cpanel_log_paths", "/etc/cpupdate.conf", "/etc/csf"],
   "commands": [
     { "family": "/usr/local/cpanel/bin/whmapi1", "args": "*", "needs_sudo": false },
     { "family": "exim", "args": "-bp*", "needs_sudo": false },

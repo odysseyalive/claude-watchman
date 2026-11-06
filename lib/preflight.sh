@@ -213,19 +213,31 @@ preflight_collate() {
 
         # reads → Read globs + additionalDirectories. A single read token may
         # resolve to several paths (e.g. webserver_log_paths), so iterate each.
-        local r path dir
+        local r path
         while IFS= read -r r; do
             [[ -n "$r" ]] || continue
             while IFS= read -r path; do
                 [[ -n "$path" ]] || continue
-                # If the path is a file, grant its dir; if a dir, grant it directly.
-                if [[ -d "$path" ]]; then dir="$path"; else dir="$(dirname "$path")"; fi
+                path="${path%/}"
+                # Grant EXACTLY what the manifest declares, never its parent: granting the parent
+                # of a file or a not-yet-existing path turned /etc/logrotate.conf into all of /etc
+                # and /var/cpanel into all of /var, credentials included. A denylist cannot list
+                # an unknown host's secrets, so the grant itself has to be narrow.
+                #
                 # Two different path grammars, tested against Claude Code 2.1.318: a permission
                 # RULE needs // to mean absolute (a single / is relative to the settings source,
                 # so Read(/etc/**) grants nothing), while additionalDirectories takes a PLAIN
-                # path (//etc grants nothing). dir already starts with /.
-                allow+=("Read(/${dir}/**)")
-                adddirs+=("${dir}")
+                # path (//etc grants nothing). path already starts with /. A Read rule works
+                # alone, so only a real directory is added to additionalDirectories.
+                if [[ -d "$path" ]]; then
+                    allow+=("Read(/${path}/**)")
+                    adddirs+=("${path}")
+                elif [[ -e "$path" ]]; then
+                    allow+=("Read(/${path})")
+                else
+                    # Absent today, may be either kind once installed. Covers only this path.
+                    allow+=("Read(/${path})" "Read(/${path}/**)")
+                fi
             done < <(_pf_resolve_read "$r")
         done < <(jq -r '.reads[]?' "$m" 2>/dev/null)
 
@@ -302,8 +314,9 @@ _pf_collate_fix() {
 # 2.1.318 confirmed a single-slash deny does not block the real path. `update --check`
 # fails if a single-slash absolute path comes back.
 #
-# The Read denies exist because the loop's read grants (//etc, //root, //home, //var) are
-# real: credentials and private keys must stay out of a session whose transcript persists.
+# The Read denies are a backstop beneath narrow grants, not the protection itself: what a
+# session reads goes to the model provider and persists in its transcript, so credentials,
+# private keys, shell history, customer sessions and past transcripts must stay out of it.
 _pf_deny_base() {
     printf '%s\n' \
         'Read(.env)' \
@@ -315,6 +328,16 @@ _pf_deny_base() {
         'Read(//home/*/.ssh/**)' \
         'Read(//root/.claude/.credentials.json)' \
         'Read(//home/*/.claude/.credentials.json)' \
+        'Read(//root/.claude.json)' \
+        'Read(//home/*/.claude.json)' \
+        'Read(//root/.claude/projects/**)' \
+        'Read(//home/*/.claude/projects/**)' \
+        'Read(//root/.*_history)' \
+        'Read(//home/*/.*_history)' \
+        'Read(//etc/letsencrypt/**)' \
+        'Read(//etc/ssl/private/**)' \
+        'Read(//etc/crowdsec/*credentials*)' \
+        'Read(//var/lib/php/sessions/**)' \
         'Bash(rm *)' \
         'Bash(rm -rf *)' \
         'Bash(sudo rm *)' \
