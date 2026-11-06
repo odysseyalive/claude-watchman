@@ -197,11 +197,19 @@ update_check_run() {
     # 8. No manifest may declare a whole system tree as readable. What a session reads goes to
     # the model provider, and a denylist cannot list an unknown host's secrets.
     printf '\n8. Least-privilege reads (no manifest declares a whole system tree)\n'
+    # Fails closed: a manifest jq cannot parse, or a malformed reads list, is a failure. Resolver
+    # tokens are host-dependent, so preflight_collate also refuses broad results when it runs.
     local broad
-    broad="$(jq -r 'input_filename as $f | (.reads // [])[] | select(test("^/(etc|var|var/lib|var/log|home|root|usr|opt|srv)?/?$")) | "\($f): \(.)"' \
-              skills/*/*/manifest.json 2>/dev/null || true)"
-    if [[ -z "$broad" ]]; then _uc_ok "manifests declare only specific paths"
-    else _uc_fail "whole-tree read declared:"$'\n'"$broad"; fi
+    if broad="$(jq -r 'input_filename as $f
+            | (.reads // []) as $r
+            | if ($r | type) == "array" and ($r | all(type == "string")) then . else error("\($f): reads must be an array of strings") end
+            | $r[] | select(test("^/(etc|var|var/lib|var/log|home|root|usr|usr/local|opt|srv|tmp|boot|proc|sys|dev|run)?/*$")) | "\($f): \(.)"' \
+              skills/*/*/manifest.json 2>&1)"; then
+        if [[ -z "$broad" ]]; then _uc_ok "manifests declare only specific paths"
+        else _uc_fail "whole-tree read declared:"$'\n'"$broad"; fi
+    else
+        _uc_fail "could not validate manifest reads:"$'\n'"$broad"
+    fi
 
     printf '\n'
     if (( fail == 0 )); then

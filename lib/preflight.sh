@@ -200,6 +200,22 @@ _pf_resolve_read() {
     printf '%s\n' "$entry"
 }
 
+# True when a path, once canonicalized, is the filesystem root or a whole system tree.
+# realpath -m also handles paths that do not exist yet; where it is unavailable (older macOS)
+# the path is compared as given, with trailing slashes removed.
+_pf_is_system_tree() {
+    local canon
+    canon="$(realpath -m -- "$1" 2>/dev/null)" || canon=""
+    if [[ -z "$canon" ]]; then
+        canon="$1"
+        while [[ "$canon" == */ && "$canon" != / ]]; do canon="${canon%/}"; done
+    fi
+    case "$canon" in
+        /|/etc|/var|/var/lib|/var/log|/home|/root|/usr|/usr/local|/opt|/srv|/tmp|/boot|/proc|/sys|/dev|/run) return 0 ;;
+    esac
+    return 1
+}
+
 # --- Collation --------------------------------------------------------------
 # Walk every manifest, resolve, and accumulate de-duplicated allow rules,
 # additionalDirectories, and sudoers command paths.
@@ -218,6 +234,12 @@ preflight_collate() {
             [[ -n "$r" ]] || continue
             while IFS= read -r path; do
                 [[ -n "$path" ]] || continue
+                # Resolver output depends on the host (a web server config can log anywhere),
+                # so a manifest check alone cannot catch this: refuse it here, on every host.
+                if _pf_is_system_tree "$path"; then
+                    echo "preflight: refusing read grant on system tree '$path' (from $r)" >&2
+                    continue
+                fi
                 path="${path%/}"
                 # Grant EXACTLY what the manifest declares, never its parent: granting the parent
                 # of a file or a not-yet-existing path turned /etc/logrotate.conf into all of /etc
@@ -334,6 +356,13 @@ _pf_deny_base() {
         'Read(//home/*/.claude/projects/**)' \
         'Read(//root/.*_history)' \
         'Read(//home/*/.*_history)' \
+        'Read(//root/.history)' \
+        'Read(//home/*/.history)' \
+        'Read(//root/.local/share/fish/**)' \
+        'Read(//home/*/.local/share/fish/**)' \
+        'Read(//etc/csf/**)' \
+        'Read(//var/lib/php/session/**)' \
+        'Read(//var/cpanel/php/sessions/**)' \
         'Read(//etc/letsencrypt/**)' \
         'Read(//etc/ssl/private/**)' \
         'Read(//etc/crowdsec/*credentials*)' \
