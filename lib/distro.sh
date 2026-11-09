@@ -96,6 +96,84 @@ _stat_inode() {
     esac
 }
 
+# --- incremental log cursors (shared by webstats_cat_logs_incremental and monitor_file_delta) ---
+# Both keep a <path> <inode> <size> TSV of how far each log has been read. These helpers hold the
+# parts that must not differ between them.
+
+# _canon_path <path> — the file's resolved real path, so every spelling of one file (symlinks,
+# //, ./, ..) shares ONE cursor. Keyed by the literal string, 22 spellings of auth.log held 22
+# cursors and a new spelling replayed days of history as new (finding 1734). Falls back to the
+# path as given when it cannot be resolved (a file that no longer exists).
+_canon_path() {
+    local p=""
+    p="$(realpath -e -- "$1" 2>/dev/null)" || p="$(readlink -f -- "$1" 2>/dev/null)" || p=""
+    printf '%s\n' "${p:-$1}"
+}
+
+# _offsets_load <offset-file> — fill the CALLER's `local -A OFF_INODE OFF_SIZE` (bash scoping is
+# dynamic, so the callee sees them). Keys are canonicalised as they load, which folds the old
+# literal-path entries together. On a collision the cursor on the file's CURRENT inode that has
+# read furthest wins, so the fold never replays history.
+_offsets_load() {
+    local k i s ck cur
+    [[ -r "$1" ]] || return 0
+    while IFS=$'\t' read -r k i s; do
+        [[ -n "$k" ]] || continue
+        [[ "$s" =~ ^[0-9]+$ ]] || s=0
+        ck="$(_canon_path "$k")"
+        if [[ -n "${OFF_INODE[$ck]+x}" ]]; then
+            cur="$(_stat_inode "$ck" 2>/dev/null || true)"
+            [[ -n "$cur" && "$i" == "$cur" ]] || continue
+            [[ "${OFF_INODE[$ck]}" != "$cur" ]] || (( s > ${OFF_SIZE[$ck]:-0} )) || continue
+        fi
+        OFF_INODE["$ck"]="$i"; OFF_SIZE["$ck"]="$s"
+    done < "$1"
+    return 0
+}
+
+# _rotated_sibling <file> <inode> — the rotated copy of <file> that still carries <inode>.
+# logrotate's default create mode RENAMES the live file, so the old inode lives on as f.1 (or
+# f-YYYYMMDD with dateext). A compressed copy is a new file with a new inode and never matches,
+# so it is skipped without a stat.
+_rotated_sibling() {
+    local f="$1" want="$2" r
+    [[ -n "$want" ]] || return 1
+    for r in "$f".[0-9]* "$f"-[0-9]*; do
+        [[ -f "$r" ]] || continue
+        case "$r" in *.gz|*.bz2|*.xz|*.zst|*.lz4) continue ;; esac
+        [[ "$(_stat_inode "$r" 2>/dev/null || true)" == "$want" ]] && { printf '%s\n' "$r"; return 0; }
+    done
+    return 1
+}
+
+# _log_delta <file> <inode> <size> <prev_inode> <prev_size> — print the bytes of <file> not yet
+# read, given the cursor the previous pass left:
+#   * same inode, grown       → [prev_size, end].
+#   * inode changed (rotated) → first the unread tail of the rotated copy that still has
+#                               prev_inode, then the new file from 0. Reading only the new file
+#                               dropped everything between the last pass and the rotation, about
+#                               five hours a day on a 6h cadence (finding 1707).
+#   * truncated, or no cursor → the file from 0.
+# Reads run at the role's I/O priority when lib/io-courtesy.sh is sourced.
+_log_delta() {
+    local f="$1" inode="$2" size="$3" pinode="${4:-}" psize="${5:-}" start=0 r rsize
+    _ld() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
+    if [[ -n "$pinode" && "$psize" =~ ^[0-9]+$ ]]; then
+        if [[ "$pinode" == "$inode" ]]; then
+            if (( size >= psize )); then start="$psize"; fi
+        elif r="$(_rotated_sibling "$f" "$pinode")"; then
+            rsize="$(_stat_size "$r" 2>/dev/null || true)"
+            if [[ "$rsize" =~ ^[0-9]+$ ]] && (( rsize > psize )); then
+                _ld tail -c "+$(( psize + 1 ))" -- "$r" 2>/dev/null || true
+            fi
+        fi
+    fi
+    if (( size > start )); then
+        _ld tail -c "+$(( start + 1 ))" -- "$f" 2>/dev/null || true
+    fi
+    return 0
+}
+
 # ca_bundle_path — the system CA bundle for TLS clients (msmtp's tls_trust_file).
 # First existing path wins: Debian/Arch, RHEL, then macOS/LibreSSL. Returns 1 with
 # no output when none is found — callers omit the trust line and let the tool's

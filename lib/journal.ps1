@@ -244,7 +244,21 @@ function journal_run_start {
 }
 
 function journal_run_finish {
-    param([string]$id, [string]$summary = '')
+    # Exactly (id, summary), mirroring journal.sh: a bare status word or a stray third arg was
+    # stored as the whole run narrative (finding 1780), so it is refused with exit code 2.
+    if ($args.Count -ne 2) {
+        [Console]::Error.WriteLine("journal_run_finish: takes exactly 2 args (id, summary), got $($args.Count)")
+        return (Wm-Exit 2)
+    }
+    $id = [string]$args[0]; $summary = [string]$args[1]
+    if ($id -notmatch '^[0-9]+$') {
+        [Console]::Error.WriteLine("journal_run_finish: id must be a row id, got '$id'")
+        return (Wm-Exit 2)
+    }
+    if (($summary -replace '\s', '').ToLower() -in @('', 'ok', 'done', 'error', 'fail', 'failed', 'success')) {
+        [Console]::Error.WriteLine("journal_run_finish: summary must narrate the run, not '$summary'")
+        return (Wm-Exit 2)
+    }
     $s = _sql_escape $summary
     _journal_write "UPDATE runs SET finished_at=datetime('now'), summary='$s' WHERE id=$id;" | Out-Null
 }

@@ -24,33 +24,28 @@ monitor_state_dir()   { echo "${WATCHMAN_ROOT:-.}/journal/monitor-state"; }
 # monitor_file_delta <path…> — emit only the NEW bytes of each given file since the last
 # pass, then advance the stored offset. Mirrors webstats_cat_logs_incremental:
 #   * Same file (inode unchanged) and grown → read [offset, end] only.
-#   * Rotated (inode changed) or truncated (size < offset) → read from 0 and reset.
-# Offsets persist as TSV: <path> <inode> <size>. Heavy reads run at the role's I/O
-# priority when lib/io-courtesy.sh is sourced.
+#   * Rotated (inode changed) → the unread tail of the rotated copy (f.1 / f-DATE) that
+#     still carries the old inode, then the new file from 0.
+#   * Truncated (size < offset) → read from 0 and reset.
+# Offsets persist as TSV: <path> <inode> <size>, keyed by the file's REAL path, so every
+# spelling of one log shares one cursor (and a file named twice in one call is read once).
+# The cursor helpers live in lib/distro.sh. Heavy reads run at the role's I/O priority
+# when lib/io-courtesy.sh is sourced.
 monitor_file_delta() {
-    local ofile tmp f inode size start
-    local -A OFF_INODE=() OFF_SIZE=()
-    _mc() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
+    local ofile tmp f inode size
+    local -A OFF_INODE=() OFF_SIZE=() SEEN=()
     ofile="$(monitor_offset_file)"
-    if [[ -r "$ofile" ]]; then
-        local k i s
-        while IFS=$'\t' read -r k i s; do
-            [[ -n "$k" ]] && { OFF_INODE["$k"]="$i"; OFF_SIZE["$k"]="$s"; }
-        done < "$ofile"
-    fi
+    _offsets_load "$ofile"
     # Carry forward offsets for files not named this pass, so an unrelated watch keeps its cursor.
     tmp="$(mktemp)"
-    local -A SEEN=()
     for f in "$@"; do
         [[ -f "$f" ]] || continue
+        f="$(_canon_path "$f")"
+        [[ -z "${SEEN[$f]:-}" ]] || continue
         SEEN["$f"]=1
         inode="$(_stat_inode "$f" 2>/dev/null)"; size="$(_stat_size "$f" 2>/dev/null)"
         [[ -n "$inode" && -n "$size" ]] || continue
-        start=0
-        if [[ "${OFF_INODE[$f]:-}" == "$inode" && -n "${OFF_SIZE[$f]:-}" && "$size" -ge "${OFF_SIZE[$f]}" ]]; then
-            start="${OFF_SIZE[$f]}"
-        fi
-        (( size > start )) && _mc tail -c "+$(( start + 1 ))" -- "$f" 2>/dev/null
+        _log_delta "$f" "$inode" "$size" "${OFF_INODE[$f]:-}" "${OFF_SIZE[$f]:-}"
         printf '%s\t%s\t%s\n' "$f" "$inode" "$size" >> "$tmp"
     done
     # Preserve cursors for any previously-tracked file not watched this pass.

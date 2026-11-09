@@ -142,7 +142,7 @@ function update_check_run {
         '.env', 'config/watchman.conf', 'journal/findings.db', 'journal/findings.db-wal',
         'journal/findings.db-shm', 'journal/network-baseline.txt', 'journal/log-offsets.txt',
         'journal/monitor-offsets.txt', 'journal/monitor-state',
-        'journal/run-ledger.tsv', 'journal/run.log', 'journal/.write.lock', '.claude', 'CLAUDE.md'
+        'journal/run-ledger.tsv', 'journal/run.log', 'journal/.write.lock', 'journal/run.lock', '.claude', 'CLAUDE.md'
     )
     foreach ($p in $artifacts) {
         # git check-ignore -q: exit 0 means ignored.

@@ -122,7 +122,7 @@ update_check_run() {
     for p in .env config/watchman.conf journal/findings.db journal/findings.db-wal \
              journal/findings.db-shm journal/network-baseline.txt journal/log-offsets.txt \
              journal/monitor-offsets.txt journal/monitor-state \
-             journal/run-ledger.tsv journal/run.log journal/.write.lock \
+             journal/run-ledger.tsv journal/run.log journal/.write.lock journal/run.lock \
              journal/liveness-alert.state journal/product-checksums.txt journal/pre-update-backup-x/ \
              .claude CLAUDE.md; do
         if git check-ignore -q "$p"; then _uc_ok "ignored: $p"

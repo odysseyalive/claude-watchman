@@ -76,35 +76,30 @@ webstats_offset_file() { echo "${WATCHMAN_ROOT:-.}/journal/log-offsets.txt"; }
 # to traffic-since-last-pass instead of the whole log every time.
 #
 #   * Same file (inode unchanged) and grown → read [offset, end] only.
-#   * Rotated (inode changed) or truncated (size < offset) → read the current file
-#     from 0 this pass, and reset. Rotated `.N`/`.gz` history is NOT re-read (the
-#     loop already saw it while it was live). One small caveat: the handful of lines
-#     written between the last pass and a rotation can be missed by the incremental
-#     path — `/watchman stats` (full read) is always complete, so use it for an
-#     authoritative report.
+#   * Rotated (inode changed) → first the unread tail of the rotated copy that still
+#     carries the old inode (access.log.1, or access.log-YYYYMMDD), then the new file
+#     from 0. Older rotated `.N`/`.gz` history is NOT re-read (the loop already saw it
+#     while it was live). If the rotated copy was compressed before this pass ran, its
+#     tail is gone from the incremental path; `/watchman stats` (full read) is always
+#     complete.
+#   * Truncated (size < offset) → read from 0 and reset.
 #
-# Offsets persist in journal/log-offsets.txt as TSV: <path> <inode> <size>.
+# Offsets persist in journal/log-offsets.txt as TSV: <path> <inode> <size>, keyed by
+# the log's real path (see _canon_path). The cursor helpers live in lib/distro.sh.
 webstats_cat_logs_incremental() {
-    local ofile tmp f inode size start
-    local -A OFF_INODE=() OFF_SIZE=()
-    _wc() { if declare -F io_run >/dev/null 2>&1; then io_run "$@"; else "$@"; fi; }
+    local ofile tmp f inode size
+    local -A OFF_INODE=() OFF_SIZE=() SEEN=()
     ofile="$(webstats_offset_file)"
-    if [[ -r "$ofile" ]]; then
-        local k i s
-        while IFS=$'\t' read -r k i s; do
-            [[ -n "$k" ]] && { OFF_INODE["$k"]="$i"; OFF_SIZE["$k"]="$s"; }
-        done < "$ofile"
-    fi
+    _offsets_load "$ofile"
     tmp="$(mktemp)"
     while IFS= read -r f; do
         [[ -f "$f" ]] || continue
+        f="$(_canon_path "$f")"
+        [[ -z "${SEEN[$f]:-}" ]] || continue
+        SEEN["$f"]=1
         inode="$(_stat_inode "$f" 2>/dev/null)"; size="$(_stat_size "$f" 2>/dev/null)"
         [[ -n "$inode" && -n "$size" ]] || continue
-        start=0
-        if [[ "${OFF_INODE[$f]:-}" == "$inode" && -n "${OFF_SIZE[$f]:-}" && "$size" -ge "${OFF_SIZE[$f]}" ]]; then
-            start="${OFF_SIZE[$f]}"
-        fi
-        (( size > start )) && _wc tail -c "+$(( start + 1 ))" -- "$f" 2>/dev/null
+        _log_delta "$f" "$inode" "$size" "${OFF_INODE[$f]:-}" "${OFF_SIZE[$f]:-}"
         printf '%s\t%s\t%s\n' "$f" "$inode" "$size" >> "$tmp"
     done < <(webstats_current_logs)
     # Atomically replace the offset state (last-writer-wins; offsets are advisory).

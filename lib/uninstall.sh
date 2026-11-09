@@ -125,7 +125,7 @@ EOF
         _un_rm "$root/config/watchman.conf" "$root"
         _un_rm_glob "$root" "journal/findings.db" "journal/findings.db-wal" "journal/findings.db-shm" \
                     "journal/network-baseline.txt" "journal/log-offsets.txt" \
-                    "journal/monitor-offsets.txt" "journal/monitor-state" "journal/.write.lock" \
+                    "journal/monitor-offsets.txt" "journal/monitor-state" "journal/.write.lock" "journal/run.lock" \
                     "journal/liveness-alert.state" "journal/product-checksums.txt" "journal/pre-update-backup-*"
     else
         _un_keep "operator data & secrets"

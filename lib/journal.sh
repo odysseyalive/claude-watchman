@@ -271,11 +271,24 @@ journal_run_start() {
     _journal_write "INSERT INTO runs(kind) VALUES('$kind'); SELECT last_insert_rowid();" | tail -n1
 }
 journal_run_finish() {
-    local id="$1" summary; summary="$(_sql_escape "${2:-}")"
+    # Exactly (id, summary). The summary is the run's narrative: a bare status word or a
+    # stray third arg used to be stored as the whole story (finding 1780), so refuse it.
+    if (( $# != 2 )); then
+        echo "journal_run_finish: takes exactly 2 args (id, summary), got $#" >&2
+        return 2
+    fi
+    local id="$1" raw="$2" trimmed summary
     [[ "$id" =~ ^[0-9]+$ ]] || {
         echo "journal_run_finish: id must be a row id, got '$id'" >&2
         return 2
     }
+    trimmed="${raw//[[:space:]]/}"
+    case "${trimmed,,}" in
+        ''|ok|done|error|fail|failed|success)
+            echo "journal_run_finish: summary must narrate the run, not '${raw}'" >&2
+            return 2 ;;
+    esac
+    summary="$(_sql_escape "$raw")"
     _journal_write "UPDATE runs SET finished_at=datetime('now'), summary='$summary' WHERE id=$id;"
 }
 # Count run rows CLOSED at or after a timestamp. Read-only. datetime() matters: finished_at is

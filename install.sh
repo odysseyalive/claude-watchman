@@ -369,6 +369,7 @@ journal/monitor-state/
 journal/run-ledger.tsv
 journal/run.log
 journal/.write.lock
+journal/run.lock
 journal/liveness-alert.state
 journal/product-checksums.txt
 journal/pre-update-backup-*/

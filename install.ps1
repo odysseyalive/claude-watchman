@@ -179,6 +179,7 @@ journal/monitor-state/
 journal/run-ledger.tsv
 journal/run.log
 journal/.write.lock
+journal/run.lock
 
 # preflight staging + scratch
 .watchman-sudoers.staged

@@ -40,6 +40,7 @@ WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$_SCHED_LIB_DIR/.." && pwd)}"
 
 SCHED_LEDGER="${SCHED_LEDGER:-$WATCHMAN_ROOT/journal/run-ledger.tsv}"
 SCHED_RUNLOG="${SCHED_RUNLOG:-$WATCHMAN_ROOT/journal/run.log}"
+SCHED_RUNLOCK="${SCHED_RUNLOCK:-$WATCHMAN_ROOT/journal/run.lock}"
 SCHED_CRON_MARK="# claude-watchman loop"
 SCHED_UNIT_MARK="# managed by claude-watchman"
 SCHED_SYSTEMD_DIR="/etc/systemd/system"
@@ -64,10 +65,40 @@ SCHED_UNIT_VERSION=2
 # dontAsk loop profile, then records the pass's tokens + cost to the ledger so
 # token use stays visible without a live meter, and checks the pass was healthy.
 # Returns claude's exit code.
+#
+# OVERLAP GUARD (finding 2115). One pass at a time: a pass that outlives the interval, or a
+# manual `watchman run` beside the timer, used to start a second pass that fought the first
+# over journal/log-offsets.txt. The pass holds a non-blocking flock on journal/run.lock; a pass
+# that cannot take it logs SKIPPED to run.log and returns 0 without starting claude. A skip
+# writes no ledger row and never reaches the health gate, so it is not a failure; the liveness
+# watchdog still judges the pass that holds the lock, so a hung pass still alerts as stale.
 schedule_run() {
     cd "$WATCHMAN_ROOT" || { echo "watchman run: cannot cd to $WATCHMAN_ROOT" >&2; return 1; }
-
     mkdir -p "$WATCHMAN_ROOT/journal"
+
+    local rc=0
+    exec {_SCHED_LOCKFD}>>"$SCHED_RUNLOCK" || {
+        echo "watchman run: cannot open $SCHED_RUNLOCK" >&2
+        return 1
+    }
+    if command -v flock >/dev/null 2>&1; then
+        if ! flock -n "$_SCHED_LOCKFD"; then
+            exec {_SCHED_LOCKFD}>&-
+            echo "[$(date -Is 2>/dev/null || date)] watchman run: SKIPPED — another pass still holds journal/run.lock" >>"$SCHED_RUNLOG"
+            echo "watchman run: another pass is still running; skipping this one." >&2
+            return 0
+        fi
+    else
+        echo "[$(date -Is 2>/dev/null || date)] watchman run: flock not found — overlap guard unavailable on this host" >>"$SCHED_RUNLOG"
+    fi
+    _sched_run_pass || rc=$?
+    exec {_SCHED_LOCKFD}>&-
+    return "$rc"
+}
+
+# The pass itself, run while schedule_run holds the lock. claude is started with the lock fd
+# CLOSED, so a child it leaves behind cannot keep holding the lock after the pass ends.
+_sched_run_pass() {
     local started out rc since_utc
     started="$(date -Is 2>/dev/null || date)"
     # For the health gate's journal comparison. Deliberately separate from $started, whose
@@ -98,7 +129,7 @@ schedule_run() {
     # --settings override: claude auto-discovers the repo's .claude/ (the read-only
     # dontAsk loop profile) from the working directory, exactly like the tmux loop.
     rc=0
-    claude -p "Run /watchman loop" --output-format json >"$out" 2>>"$SCHED_RUNLOG" || rc=$?
+    claude -p "Run /watchman loop" --output-format json >"$out" 2>>"$SCHED_RUNLOG" {_SCHED_LOCKFD}>&- || rc=$?
 
     if command -v jq >/dev/null 2>&1 && [[ -s "$out" ]]; then
         local cost intok outtok cachetok dur turns iserr sid
