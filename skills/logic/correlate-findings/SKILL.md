@@ -37,14 +37,20 @@ After the observe skills in every `/watchman audit` / `/watchman loop`, before
      `inspect-logs` against the `baseline-network` snapshot, plus log-retention regressions.
 3. **Regressions are loudest.** A `fixed`→`regressed` transition (already set by the
    journal upsert) is the highest-signal event — count and surface it prominently.
-4. **Record the run.** Open with `bash lib/wm journal_run_start`, write a one-line `summary`
-   (counts of new/regressed/cleared) with `bash lib/wm journal_run_finish`. This summary is what
-   the loop threshold-checks.
+4. **Record the run.** In ONE call, once the delta is known:
+   `bash lib/wm journal_run_record loop "<summary>"` (use the pass's kind: `loop`, `audit`, …).
+   The summary narrates the run: counts of new/regressed/cleared and what stood out. A bare word
+   such as `ok` or `done` is refused. For a long summary, pass `-` and pipe it in on stdin:
+   `printf '%s\n' "<summary>" | bash lib/wm journal_run_record loop -`. Do NOT split this into
+   `journal_run_start` + `journal_run_finish`, and do NOT write a helper script to carry the id
+   between calls: the loop's dontAsk profile refuses the `$(…)` capture that split needs. This
+   summary is what the loop threshold-checks, and the headless health gate requires a run row
+   closed during the pass.
 5. **Read-and-record only.** This skill changes no system state; its only writes are
    routine journal updates (run row + any status normalization) through `lib/journal.sh`.
 <!-- /origin -->
 
 ## Grounding
 
-- `lib/journal.sh` — `journal_run_start`, `journal_run_finish`, `journal_count_open`, `journal_count_regressed` (reached via `bash lib/wm <function>`).
+- `lib/journal.sh` — `journal_run_record` (or `journal_run_start` + `journal_run_finish`), `journal_count_open`, `journal_count_regressed` (reached via `bash lib/wm <function>`).
 - `lib/profile.sh` — which deltas matter per profile (reached via `bash lib/wm <function>`).

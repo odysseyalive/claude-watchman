@@ -270,26 +270,52 @@ journal_run_start() {
     local kind; kind="$(_sql_escape "${1:-audit}")"
     _journal_write "INSERT INTO runs(kind) VALUES('$kind'); SELECT last_insert_rowid();" | tail -n1
 }
+# _run_summary <caller> <summary|-> — print the run summary to store, or fail with 2. A summary
+# of "-" is read from stdin, so a long narrative needs no shell quoting. The summary is the
+# run's narrative: a bare status word used to be stored as the whole story (finding 1780).
+_run_summary() {
+    local fn="$1" raw="$2" trimmed
+    [[ "$raw" == "-" ]] && raw="$(cat)"
+    trimmed="${raw//[[:space:]]/}"
+    case "${trimmed,,}" in
+        ''|ok|done|error|fail|failed|success)
+            echo "$fn: summary must narrate the run, not '${raw}'" >&2
+            return 2 ;;
+    esac
+    printf '%s' "$raw"
+}
 journal_run_finish() {
-    # Exactly (id, summary). The summary is the run's narrative: a bare status word or a
-    # stray third arg used to be stored as the whole story (finding 1780), so refuse it.
+    # Exactly (id, summary); a stray third arg is refused rather than silently dropped.
     if (( $# != 2 )); then
         echo "journal_run_finish: takes exactly 2 args (id, summary), got $#" >&2
         return 2
     fi
-    local id="$1" raw="$2" trimmed summary
+    local id="$1" raw summary
     [[ "$id" =~ ^[0-9]+$ ]] || {
         echo "journal_run_finish: id must be a row id, got '$id'" >&2
         return 2
     }
-    trimmed="${raw//[[:space:]]/}"
-    case "${trimmed,,}" in
-        ''|ok|done|error|fail|failed|success)
-            echo "journal_run_finish: summary must narrate the run, not '${raw}'" >&2
-            return 2 ;;
-    esac
+    raw="$(_run_summary journal_run_finish "$2")" || return 2
     summary="$(_sql_escape "$raw")"
     _journal_write "UPDATE runs SET finished_at=datetime('now'), summary='$summary' WHERE id=$id;"
+}
+# journal_run_record <kind> <summary|-> — open and close a run row in ONE call, printing its id.
+# For a pass that records its run at the end: it needs no id carried between two Bash calls,
+# which under the loop's dontAsk profile meant a $(…) capture the permission layer refuses, so
+# passes wrote throwaway scripts into journal/ to get around it.
+journal_run_record() {
+    if (( $# != 2 )); then
+        echo "journal_run_record: takes exactly 2 args (kind, summary), got $#" >&2
+        return 2
+    fi
+    [[ "$1" =~ ^[a-z][a-z-]*$ ]] || {
+        echo "journal_run_record: kind must be a plain word like loop or audit, got '$1'" >&2
+        return 2
+    }
+    local raw summary
+    raw="$(_run_summary journal_run_record "$2")" || return 2
+    summary="$(_sql_escape "$raw")"
+    _journal_write "INSERT INTO runs(kind, finished_at, summary) VALUES('$1', datetime('now'), '$summary'); SELECT last_insert_rowid();" | tail -n1
 }
 # Count run rows CLOSED at or after a timestamp. Read-only. datetime() matters: finished_at is
 # stored as 'YYYY-MM-DD HH:MM:SS' UTC, and a plain text compare against an ISO time with a T

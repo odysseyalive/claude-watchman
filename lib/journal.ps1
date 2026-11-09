@@ -251,6 +251,7 @@ function journal_run_finish {
         return (Wm-Exit 2)
     }
     $id = [string]$args[0]; $summary = [string]$args[1]
+    if ($summary -eq '-') { $summary = ([Console]::In.ReadToEnd()).TrimEnd("`r", "`n") }
     if ($id -notmatch '^[0-9]+$') {
         [Console]::Error.WriteLine("journal_run_finish: id must be a row id, got '$id'")
         return (Wm-Exit 2)
@@ -261,6 +262,28 @@ function journal_run_finish {
     }
     $s = _sql_escape $summary
     _journal_write "UPDATE runs SET finished_at=datetime('now'), summary='$s' WHERE id=$id;" | Out-Null
+}
+
+# journal_run_record <kind> <summary|-> — open and close a run row in ONE call, returning its id.
+# Mirrors journal.sh: a pass needs no id carried between calls; "-" reads the summary from stdin.
+function journal_run_record {
+    if ($args.Count -ne 2) {
+        [Console]::Error.WriteLine("journal_run_record: takes exactly 2 args (kind, summary), got $($args.Count)")
+        return (Wm-Exit 2)
+    }
+    $kind = [string]$args[0]; $summary = [string]$args[1]
+    if ($kind -cnotmatch '^[a-z][a-z-]*$') {
+        [Console]::Error.WriteLine("journal_run_record: kind must be a plain word like loop or audit, got '$kind'")
+        return (Wm-Exit 2)
+    }
+    if ($summary -eq '-') { $summary = ([Console]::In.ReadToEnd()).TrimEnd("`r", "`n") }
+    if (($summary -replace '\s', '').ToLower() -in @('', 'ok', 'done', 'error', 'fail', 'failed', 'success')) {
+        [Console]::Error.WriteLine("journal_run_record: summary must narrate the run, not '$summary'")
+        return (Wm-Exit 2)
+    }
+    $s = _sql_escape $summary
+    $out = _journal_write "INSERT INTO runs(kind, finished_at, summary) VALUES('$kind', datetime('now'), '$s'); SELECT last_insert_rowid();"
+    return ($out | Select-Object -Last 1)
 }
 
 # --- Read helpers (no writes) ----------------------------------------------
