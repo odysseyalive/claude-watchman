@@ -251,8 +251,9 @@ function preflight_write_base_settings([string]$claude_dir) {
         $existing = @(); if ($obj.permissions.deny) { $existing = @($obj.permissions.deny) }
         $merged = @($existing) + @($deny | Where-Object { $existing -notcontains $_ })
         $obj.permissions | Add-Member -NotePropertyName deny -NotePropertyValue $merged -Force
-        ($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $target
-        Write-Host "preflight: repaired base settings.json (dontAsk + deny base re-asserted)."
+        if (_pf_replace_settings $target $obj) {
+            Write-Host "preflight: base settings.json checked (dontAsk + deny base re-asserted)."
+        }
         return
     }
     $base = [pscustomobject]@{ permissions = [pscustomobject]@{ defaultMode = 'dontAsk'; deny = $deny } }
@@ -265,13 +266,161 @@ function _pf_read_lines([string]$file) {
     return @()
 }
 
+# --- Never lose a settings file to regeneration (mirror of lib/preflight.sh) --
+# Overwriting is destructive under the Prime Directive, so a settings file whose content
+# would change is first copied to journal/pre-update-backup-<stamp>-preflight/.claude/.
+$script:_PF_BACKUP_DIR = $null
+function _pf_replace_settings([string]$target, $obj) {
+    $json = $obj | ConvertTo-Json -Depth 12
+    if (Test-Path -LiteralPath $target) {
+        $old = Get-Content -Raw -LiteralPath $target
+        if ($old.TrimEnd() -eq $json.TrimEnd()) { return $true }
+        if (-not $script:_PF_BACKUP_DIR) {
+            $script:_PF_BACKUP_DIR = Join-Path $script:WATCHMAN_ROOT ("journal/pre-update-backup-{0}-{1}-preflight" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID)
+        }
+        try {
+            $bdir = Join-Path $script:_PF_BACKUP_DIR '.claude'
+            New-Item -ItemType Directory -Force -Path $bdir | Out-Null
+            Copy-Item -LiteralPath $target -Destination $bdir -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "preflight: could not back up $target - left it unchanged."
+            return $false
+        }
+    }
+    $json | Set-Content -LiteralPath $target
+    return $true
+}
+
+# Can this command change the system? A second check under _pf_rule_carryable: Edit/Write,
+# state-changing cmdlet verbs, native tools that write, network fetches, and any interpreter
+# handed a script.
+function _pf_rule_mutates([string]$rule) {
+    if ($rule -match '^(Edit|Write|NotebookEdit)\(') { return $true }
+    if ($rule -notmatch '^(PowerShell|Bash)\((.*)\)$') { return $false }
+    $cmd = $Matches[2].Trim()
+    if ($cmd -match '^(?i)(Set|New|Remove|Stop|Start|Restart|Enable|Disable|Install|Uninstall|Add|Clear|Copy|Move|Rename|Register|Unregister|Update|Suspend|Resume|Reset|Grant|Revoke|Mount|Dismount|Initialize|Format|Out|Export|Import|Publish|Unpublish|Unblock|Lock|Unlock)-') { return $true }
+    if ($cmd -match '^(?i)(Invoke-WebRequest|Invoke-RestMethod|Invoke-Expression|Invoke-Command|Invoke-Item|iwr|irm|iex|curl|wget|del|erase|rd|rmdir|rm|mv|move|cp|copy|ren|ni|md|mkdir|sc|netsh|winget|choco|scoop|msiexec|icacls|takeown|attrib|bcdedit|diskpart|schtasks|wmic|net|reg|taskkill|shutdown|setx|robocopy|xcopy|ssh|scp)(\s|$)') {
+        if ($cmd -match '^(?i)reg\s+(query|export)\b' -or $cmd -match '^(?i)sc\s+(query|qc|queryex)\b' -or $cmd -match '^(?i)net\s+(view|user|localgroup|share|session|statistics)(\s|$)(?!.*\s/(add|delete|active))') { return $false }
+        return $true
+    }
+    if ($cmd -match '^(?i)git\s+(-C\s+\S+\s+)?(commit|push|pull|fetch|reset|checkout|switch|restore|merge|rebase|clean|stash|add|rm|mv|tag|branch|init|clone|apply|am|cherry-pick|revert)\b') { return $true }
+    if ($cmd -match '^(?i)git\s.*(--output|--no-index|--ext-diff|--textconv|--exec|--upload-pack|--receive-pack|\s-c\s|--config)') { return $true }
+    if ($cmd -match '^(?i)ipconfig\s.*/(release|renew|flushdns|registerdns|setclassid)') { return $true }
+    if ($cmd -match '^(?i)(pwsh|powershell|cmd|bash|sh|python[0-9.]*|py|perl|ruby|node|php)(\.exe)?\s+(-File\s+|/c\s+)?[^-/]') { return $true }
+    if ($cmd -match '^(?i)(pwsh|powershell)(\.exe)?\s+.*-(File|Command)\s') { return $true }
+    return $false
+}
+
+# Is this path narrow enough to carry? Not a whole system tree (a drive root, Windows, Users,
+# ProgramData, Program Files: the Windows homes of the trees `update --check` refuses), not
+# home- or env-relative, no '..', and no wildcard except a trailing /* or /** on a specific path.
+function _pf_path_narrow([string]$p) {
+    if (-not $p -or $p -match '^(~|\$|%)' -or $p.Contains('..')) { return $false }
+    # Unnormalised paths (C://Users//**, C:/./Users) would slip past the tree match below.
+    $body = $p -replace '^(//?)?([A-Za-z]:)?', ''
+    if ($body -match '[\\/]{2}|[\\/]\.([\\/]|$)|^\.([\\/]|$)') { return $false }
+    $stem = $p -replace '[\\/]\*\*?$', ''
+    if ($stem.Contains('*')) { return $false }
+    $tree = '^(?i)(/{0,2}[A-Za-z]:|//[A-Za-z]|/)?[\\/]*((Windows|Users|ProgramData|Program Files( \(x86\))?|Windows[\\/]System32)[\\/]*)?$'
+    if ($stem -match $tree) { return $false }
+    return $true
+}
+
+# Which operator rules may be carried into the read-only loop allowlist? An ALLOWLIST, as in
+# _pf_rule_carryable in preflight.sh: a narrow Read, a read-only cmdlet or query form with any
+# arguments, or a file-content reader only as the exact approved command (a wildcard one would
+# read past the Read deny base). Pipes, redirection, chaining, subexpressions and the backtick
+# escape are held, as is every bare tool name, MCP tool, Edit/Write and unknown command.
+# Named cmdlets only, not Get-*: Get-ItemProperty and Get-CimInstance can read stored secrets
+# (an autologon password, a process command line). Interpreters, sqlite3, and anything that
+# takes a scriptblock are on no list, so they are always held.
+$script:_PF_RO_ANYARGS = '(?i)^(Get-(Service|Process|NetTCPConnection|NetUDPEndpoint|NetFirewallProfile|NetFirewallRule|HotFix|Volume|PSDrive|Disk|Date|Command|Module|ScheduledTask|LocalUser|LocalGroup|MpComputerStatus|BitLockerVolume|ComputerInfo|ChildItem|Item|Acl|FileHash)|Test-Path|Resolve-Path|whoami|hostname|systeminfo|tasklist|netstat|ver)(\s|:|$)'
+$script:_PF_RO_PREFIX  = '(?i)^(reg\s+query|sc(\.exe)?\s+(query|qc|queryex)|net\s+(view|user|localgroup|share|session|statistics)|auditpol\s+/get|bcdedit\s+/enum|manage-bde\s+-status|netsh\s+\S+(\s+\S+)?\s+show)(\s|:|$)'
+$script:_PF_RO_EXACT   = '(?i)^(Get-Content|Select-String|type|more|findstr|cat|jq|ipconfig|git(\s+-C\s+\S+)?\s+(status|log|diff|show|rev-parse|ls-files|describe))(\s|$)'
+function _pf_rule_carryable([string]$rule) {
+    if ($rule -match '^Read\((.*)\)$') { return (_pf_path_narrow $Matches[1]) }
+    if ($rule -notmatch '^(PowerShell|Bash)\((.*)\)$') { return $false }
+    $cmd = $Matches[2].Trim()
+    if (-not $cmd -or $cmd.StartsWith('*')) { return $false }
+    if ($cmd -match '[|>;&`]|\$\(|\$\\\(') { return $false }
+    if (_pf_rule_mutates "PowerShell($cmd)") { return $false }
+    if ($cmd -match $script:_PF_RO_ANYARGS) { return $true }
+    if ($cmd -match $script:_PF_RO_PREFIX) { return $true }
+    if (-not $cmd.Contains('*') -and $cmd -match $script:_PF_RO_EXACT) { return $true }
+    return $false
+}
+
+# Claude Code saves the operator's "always allow" approvals into settings.local.json, so it is
+# not regenerated wholesale: the generated rules are recorded in .watchman-generated.json and
+# anything else in the file is the operator's. With no record yet (an older install), only rules
+# the current generator produces count as generated, since the Windows generator has always
+# written the same rule forms. Only operator rules _pf_rule_carryable recognises as read-only are
+# carried into this read-only loop profile, and only the rule lists: any other key (defaultMode,
+# hooks, env ...) would outrank the base settings.json. deny and ask are carried because they only
+# tighten. Everything held is listed and kept in the backup.
 function preflight_write_local_settings([string]$claude_dir) {
     $target = Join-Path $claude_dir 'settings.local.json'
-    $allow = _pf_read_lines (Join-Path $script:WATCHMAN_ROOT '.pf.allow')
-    $dirs = _pf_read_lines (Join-Path $script:WATCHMAN_ROOT '.pf.dirs')
-    $obj = [pscustomobject]@{ permissions = [pscustomobject]@{ allow = $allow; additionalDirectories = $dirs } }
-    ($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $target
-    Write-Host "preflight: wrote agent allowlist $target ($($allow.Count) allow rules)"
+    $record = Join-Path $claude_dir '.watchman-generated.json'
+    $allow = @(_pf_read_lines (Join-Path $script:WATCHMAN_ROOT '.pf.allow'))
+    $dirs = @(_pf_read_lines (Join-Path $script:WATCHMAN_ROOT '.pf.dirs'))
+    $kept = [System.Collections.Generic.List[string]]::new()
+    $held = [System.Collections.Generic.List[string]]::new()
+    $keptDirs = [System.Collections.Generic.List[string]]::new()
+    $cur = $null
+    if (Test-Path -LiteralPath $target) { try { $cur = Get-Content -Raw -LiteralPath $target | ConvertFrom-Json } catch { $cur = $null } }
+    if ($cur -and $cur.permissions) {
+        $prevAllow = @(); $prevDirs = @()
+        if (Test-Path -LiteralPath $record) {
+            try {
+                $rec = Get-Content -Raw -LiteralPath $record | ConvertFrom-Json
+                $prevAllow = @($rec.allow); $prevDirs = @($rec.additionalDirectories)
+            } catch {}
+        }
+        foreach ($r in @($cur.permissions.allow)) {
+            if (-not ($r -is [string]) -or -not $r) { continue }
+            if ($allow -ccontains $r -or $prevAllow -ccontains $r -or $kept -ccontains $r) { continue }
+            if (_pf_rule_carryable $r) { $kept.Add($r) } else { $held.Add($r) }
+        }
+        foreach ($d in @($cur.permissions.additionalDirectories)) {
+            if (-not ($d -is [string]) -or -not $d) { continue }
+            if ($dirs -ccontains $d -or $prevDirs -ccontains $d -or $keptDirs -ccontains $d) { continue }
+            if (_pf_path_narrow $d) { $keptDirs.Add($d) } else { $held.Add("additionalDirectories: $d") }
+        }
+    }
+    if ($cur) {
+        foreach ($k in $cur.PSObject.Properties.Name) { if ($k -ne 'permissions') { $held.Add("setting: $k") } }
+        if ($cur.permissions) {
+            foreach ($k in $cur.permissions.PSObject.Properties.Name) {
+                if (@('allow', 'additionalDirectories', 'deny', 'ask') -notcontains $k) { $held.Add("setting: permissions.$k") }
+            }
+        }
+    }
+    $perm = [ordered]@{
+        allow = @(@($allow) + @($kept) | Select-Object -Unique)
+        additionalDirectories = @(@($dirs) + @($keptDirs) | Select-Object -Unique)
+    }
+    foreach ($k in @('deny', 'ask')) {
+        # Built outside an if-expression: PowerShell unwraps a one-item array returned from one.
+        $v = @()
+        if ($cur -and $cur.permissions) { $v = @($cur.permissions.$k | Where-Object { $_ -is [string] }) }
+        if ($v.Count -gt 0) { $perm[$k] = $v }
+    }
+    $obj = [pscustomobject]@{ permissions = [pscustomobject]$perm }
+    if (-not (_pf_replace_settings $target $obj)) { return }
+    ([pscustomobject]@{ allow = @($allow); additionalDirectories = @($dirs) } | ConvertTo-Json -Depth 4) |
+        Set-Content -LiteralPath $record
+    Write-Host "preflight: wrote agent allowlist $target ($($allow.Count + $kept.Count) allow rules)"
+    if (($kept.Count + $keptDirs.Count) -gt 0) {
+        Write-Host "preflight: kept $($kept.Count + $keptDirs.Count) operator-approved rule(s)/dir(s) already in that file."
+    }
+    if ($held.Count -gt 0) {
+        Write-Warning ("preflight: $($held.Count) operator-approved rule(s)/setting(s) are not recognisably read-only, " +
+            "so they were NOT carried into the read-only loop allowlist (dontAsk would run them unattended):")
+        $held | ForEach-Object { Write-Host "    $_" }
+        Write-Host "  The previous file, with these rules, is saved in $($script:_PF_BACKUP_DIR)/.claude/"
+        Write-Host "  In the loop they now auto-deny; for remediation work use 'watchman fix', which prompts for each."
+    }
+    if ($script:_PF_BACKUP_DIR) { Write-Host "preflight: previous settings saved to $($script:_PF_BACKUP_DIR)/.claude/" }
 }
 
 function preflight_write_fix_settings([string]$claude_dir) {
@@ -283,7 +432,7 @@ function preflight_write_fix_settings([string]$claude_dir) {
             @(_pf_read_lines (Join-Path $script:WATCHMAN_ROOT '.pf.fix.dirs')) | Where-Object { $_ } | Sort-Object -Unique
     $obj = [pscustomobject]@{ permissions = [pscustomobject]@{
         defaultMode = 'default'; deny = @(_pf_deny_base); allow = $allow; additionalDirectories = $dirs } }
-    ($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $target
+    if (-not (_pf_replace_settings $target $obj)) { return }
     Write-Host "preflight: wrote fix profile $target ($($allow.Count) allow rules, default mode)"
 }
 
@@ -297,7 +446,7 @@ function preflight_write_dev_settings([string]$claude_dir) {
     )
     $obj = [pscustomobject]@{ permissions = [pscustomobject]@{
         defaultMode = 'acceptEdits'; deny = @(_pf_deny_base); allow = $allow; additionalDirectories = @($root) } }
-    ($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $target
+    if (-not (_pf_replace_settings $target $obj)) { return }
     Write-Host "preflight: wrote dev profile $target (acceptEdits, repo-write)"
 }
 
