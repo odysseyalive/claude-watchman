@@ -477,9 +477,39 @@ _pf_replace_settings() {   # <target> <new-file>: back up target if it changes, 
     mv -f "$new" "$target"
 }
 
-# Can this allow rule change the system? Used to keep the loop profile read-only
-# when carrying operator rules forward. Conservative: Edit/Write, anything that
-# runs a script or reaches the network, and the known mutating verbs all count.
+# Which operator rules may be carried into the read-only loop allowlist? An ALLOWLIST,
+# not a denylist: a rule is carried only when it is recognisably read-only, and
+# everything else (bare tool names, MCP tools, WebFetch, Edit/Write, unknown commands,
+# wildcards on anything that reads file contents) is held, listed, and kept in the
+# backup. A rule that reads arbitrary files as a wildcard (Bash(cat *)) is held because
+# it would read past the deny base, which only guards the Read tool.
+#
+#   _PF_RO_ANYARGS  read-only whatever the arguments, and never print file contents.
+#   _PF_RO_PREFIX   read-only subcommands of tools that also have writing ones.
+#   _PF_RO_EXACT    read-only only as the exact command the operator approved (no '*').
+_PF_RO_ANYARGS='ls|stat|df|du|free|uptime|id|whoami|uname|ps|lsof|getent|last|lastb|lastlog|who|w|dpkg-query|lsattr|lsblk|findmnt|echo|printf|true|which|readlink|realpath|basename|dirname|nproc|lscpu|lsmod'
+_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|git( -C [^ ]+)? (status|log|diff|show|rev-parse|ls-files|describe)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v'
+_PF_RO_EXACT='cat|head|tail|wc|grep|egrep|fgrep|zgrep|zcat|cut|tr|jq|diff|cmp|file|md5sum|sha1sum|sha256sum|sort|uniq|date|hostname|ss|awk|set|bash|sh|php|python3|shellcheck|journalctl|sysctl|test'
+_pf_rule_carryable() {
+    local r="$1" cmd
+    case "$r" in
+        Read\(*\)) r="${r#Read(}"; _pf_path_narrow "${r%)}"; return ;;
+        Bash\(*\)) ;;
+        *) return 1 ;;
+    esac
+    cmd="${r#Bash(}"; cmd="${cmd%)}"; cmd="${cmd#sudo }"
+    [[ -n "$cmd" && "$cmd" != \** ]] || return 1
+    # Command substitution, redirection and chaining make an "exact" rule do more than it shows.
+    [[ "$cmd" == *'`'* || "$cmd" == *'$('* || "$cmd" == *'$\('* || "$cmd" == *'>'* || "$cmd" == *';'* || "$cmd" == *'&'* ]] && return 1
+    _pf_rule_mutates "Bash($cmd)" && return 1
+    [[ "$cmd" =~ ^(${_PF_RO_ANYARGS})(\ |:|$) ]] && return 0
+    [[ "$cmd" =~ ^(${_PF_RO_PREFIX})(\ |:|$) ]] && return 0
+    [[ "$cmd" != *'*'* && "$cmd" =~ ^(${_PF_RO_EXACT})(\ |$) ]] && return 0
+    return 1
+}
+
+# Can this command change the system? A second check under _pf_rule_carryable, so
+# an exact command built from a read-only verb is still refused when it writes.
 _pf_rule_mutates() {
     local rule="$1" cmd
     case "$rule" in
@@ -489,6 +519,11 @@ _pf_rule_mutates() {
     esac
     cmd="${rule#Bash(}"; cmd="${cmd%)}"
     cmd="${cmd#sudo }"
+    [[ "$cmd" =~ ^journalctl\ .*--(vacuum|rotate|flush|sync|relinquish|setup-keys) ]] && return 0
+    [[ "$cmd" =~ ^(sort|uniq)\ .*(-o|--output) ]] && return 0
+    [[ "$cmd" =~ ^date\ .*(-s|--set) ]] && return 0
+    [[ "$cmd" =~ ^hostname\ +[^-] ]] && return 0
+    [[ "$cmd" =~ ^ss\ .*(-K|--kill) ]] && return 0
     [[ "$cmd" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && return 0      # env-prefixed (WM_APPLY=1 …)
     [[ "$cmd" =~ ^(rm|rmdir|mv|cp|ln|chmod|chown|chgrp|chattr|tee|truncate|install|dd|mkfs[^\ ]*|mkdir|touch|kill|pkill|killall|reboot|shutdown|halt|poweroff|useradd|usermod|userdel|groupadd|groupdel|passwd|chpasswd|visudo|crontab|mount|umount|ufw|firewall-cmd|nft|iptables|ip6tables|pacman|dnf|yum|zypper|snap|flatpak|pip3?|npm|a2en[a-z]*|a2dis[a-z]*|phpenmod|phpdismod|service|curl|wget|scp|rsync|ssh|etckeeper)([\ ]|$) ]] && return 0
     [[ "$cmd" =~ ^(apt|apt-get|aptitude)\ +(install|remove|purge|upgrade|full-upgrade|dist-upgrade|autoremove|update|reinstall) ]] && return 0
@@ -504,15 +539,18 @@ _pf_rule_mutates() {
     return 1
 }
 
-# Does this rule or directory grant a whole system tree? The same trees `update --check`
-# refuses in a manifest: what a session reads goes to the model provider, so a carried-
-# forward Read(//etc/**) or /root would undo least privilege for good.
-_PF_BROAD_TREES='(etc|var|var/lib|var/log|home|root|usr|usr/local|opt|srv|tmp|boot|proc|sys|dev|run)?'
-_pf_rule_broad() {
-    local r="$1"
-    [[ "$r" =~ ^(Read|Edit|Write)\(/?/${_PF_BROAD_TREES}/*(\*\*?)?\)$ ]] && return 0
-    [[ "$r" =~ ^/?/${_PF_BROAD_TREES}/*$ ]] && return 0
-    return 1
+# Is this path (a Read rule's path, or an additionalDirectories entry) narrow enough to
+# carry? Not a whole system tree (the trees `update --check` refuses in a manifest: what a
+# session reads goes to the model provider), not home-relative, no '..', and no wildcard
+# except a trailing /* or /** on an otherwise specific path. Read(//home/*/**) is held.
+_PF_BROAD_TREES='(etc|var|var/lib|var/log|var/run|home|root|usr|usr/local|opt|srv|tmp|boot|proc|sys|dev|run)?'
+_pf_path_narrow() {
+    local p="$1" stem
+    [[ -n "$p" && "$p" != \~* && "$p" != *..* ]] || return 1
+    stem="${p%/\*\*}"; stem="${stem%/\*}"
+    [[ "$stem" == *'*'* ]] && return 1
+    [[ "$stem" =~ ^/?/${_PF_BROAD_TREES}/*$ ]] && return 1
+    return 0
 }
 
 # --- Emit settings.local.json ----------------------------------------------
@@ -527,9 +565,10 @@ _pf_rule_broad() {
 # additionalDirectories (//etc). Rules the current generator produces are generated
 # by definition. Everything else is treated as the operator's.
 #
-# Operator rules that can change the system are NOT carried into this profile: it is
-# the read-only loop allowlist, and dontAsk would run them unattended. They stay in
-# the backup and are listed, so the operator can re-grant any of them deliberately.
+# Only operator rules _pf_rule_carryable recognises as read-only are carried into this
+# profile: it is the read-only loop allowlist, and dontAsk would run them unattended.
+# Everything else, and every key other than the rule lists, stays in the backup and is
+# listed, so the operator can re-grant any of it deliberately.
 preflight_write_local_settings() {
     local claude_dir="$1" target="$1/settings.local.json"
     local record="$1/.watchman-generated.json"
@@ -552,15 +591,24 @@ preflight_write_local_settings() {
             grep -qxF -- "$r" <<< "$allow" && continue
             grep -qxF -- "$r" <<< "$prev_allow" && continue
             [[ "$legacy" == yes && "$r" =~ ^(Read|Edit|Write)\(/[^/] ]] && continue
-            if _pf_rule_mutates "$r" || _pf_rule_broad "$r"; then held+=("$r"); else kept+=("$r"); fi
+            if _pf_rule_carryable "$r"; then kept+=("$r"); else held+=("$r"); fi
         done < <(jq -r '.permissions.allow[]? | strings' "$target")
         while IFS= read -r r; do
             [[ -n "$r" ]] || continue
             grep -qxF -- "$r" <<< "$dirs" && continue
             grep -qxF -- "$r" <<< "$prev_dirs" && continue
             [[ "$legacy" == yes && "$r" == //* ]] && continue
-            if _pf_rule_broad "$r"; then held+=("additionalDirectories: $r"); else kept_dirs+=("$r"); fi
+            if [[ "$r" == /* ]] && _pf_path_narrow "$r"; then kept_dirs+=("$r"); else held+=("additionalDirectories: $r"); fi
         done < <(jq -r '.permissions.additionalDirectories[]? | strings' "$target")
+        # Only the rule lists are carried. Any other key (defaultMode, hooks, env, MCP
+        # server approvals …) would outrank or widen the loop's base settings.json, so it
+        # is held. deny and ask are carried below because they can only tighten.
+        while IFS= read -r r; do
+            [[ -n "$r" ]] && held+=("setting: $r")
+        done < <(jq -r '(keys_unsorted[] | select(. != "permissions")),
+                        ((.permissions // {}) | keys_unsorted[]
+                           | select(IN("allow","additionalDirectories","deny","ask") | not)
+                           | "permissions.\(.)")' "$target" 2>/dev/null)
     fi
 
     local new; new="$(mktemp "${target}.XXXXXX")" || return 1
@@ -571,11 +619,14 @@ preflight_write_local_settings() {
           --slurpfile old <( [[ -f "$target" ]] && jq -e . "$target" 2>/dev/null || echo '{}' ) '
       def lines: split("\n") | map(select(length>0));
       def ordered_unique: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
-      ($old[0] // {}) as $o
-      | $o * {permissions: (($o.permissions // {}) * {
-           allow: (($allow | lines) + ($xa | lines) | ordered_unique),
-           additionalDirectories: (($dirs | lines) + ($xd | lines) | ordered_unique)
-        })}' > "$new" || { rm -f "$new"; echo "preflight: could not build $target" >&2; return 1; }
+      def strlist: if type == "array" then map(strings) else [] end;
+      (($old[0] // {}).permissions // {}) as $p
+      | {permissions: (
+            {allow: (($allow | lines) + ($xa | lines) | ordered_unique),
+             additionalDirectories: (($dirs | lines) + ($xd | lines) | ordered_unique)}
+          + (if ($p.deny | strlist | length) > 0 then {deny: ($p.deny | strlist)} else {} end)
+          + (if ($p.ask  | strlist | length) > 0 then {ask:  ($p.ask  | strlist)} else {} end))}
+      ' > "$new" || { rm -f "$new"; echo "preflight: could not build $target" >&2; return 1; }
     _pf_replace_settings "$target" "$new" || return 1
     jq -n --arg allow "$allow" --arg dirs "$dirs" '
       def lines: split("\n") | map(select(length>0));
@@ -586,8 +637,8 @@ preflight_write_local_settings() {
         echo "preflight: kept $(( ${#kept[@]} + ${#kept_dirs[@]} )) operator-approved rule(s)/dir(s) already in that file." >&2
     fi
     if (( ${#held[@]} )); then
-        echo "preflight: NOTICE — ${#held[@]} operator-approved rule(s) can change the system or read a whole system" >&2
-        echo "           tree, so they were NOT carried into the read-only loop allowlist (dontAsk would run them unattended):" >&2
+        echo "preflight: NOTICE — ${#held[@]} operator-approved rule(s)/setting(s) are not recognisably read-only, so they" >&2
+        echo "           were NOT carried into the read-only loop allowlist (dontAsk would run them unattended):" >&2
         printf '             %s\n' "${held[@]}" >&2
         echo "           The previous file, with these rules, is saved in $_PF_BACKUP_DIR/.claude/" >&2
         echo "           In the loop they now auto-deny; for remediation work use 'watchman fix', which prompts for each." >&2
