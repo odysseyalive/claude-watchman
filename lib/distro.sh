@@ -360,14 +360,38 @@ service_restart() {  # MUTATING
 }
 
 # --- Firewall operations ----------------------------------------------------
-# Resolves to ufw / firewalld / nftables. firewall_list is read-only; allow/deny
-# are MUTATING and, per the Prime Directive + risk tiers, must be shown exactly
-# and confirmed per-rule by the operator before the fixer applies them — a wrong
-# rule can sever SSH.
+# Resolves to csf / apf / ufw / firewalld / nftables. firewall_list is read-only;
+# allow/deny are MUTATING and, per the Prime Directive + risk tiers, must be shown
+# exactly and confirmed per-rule by the operator before the fixer applies them — a
+# wrong rule can sever SSH.
+#
+# Selection prefers the firewall that is actually IN CHARGE, not merely installed.
+# On a cPanel/InterWorx box firewall-cmd is usually present while firewalld is
+# stopped and CSF (or APF) owns the ruleset; driving firewalld there changes nothing.
+#   1. the installed-based choice is computed exactly as before (family preference,
+#      then firewalld / ufw / nftables by presence);
+#   2. it is overridden ONLY by a backend whose service is positively active:
+#      csf (csf or lfd unit), then apf, then firewalld / ufw when the old choice's
+#      own service is not active. An empty/unknown status (no systemctl) never
+#      overrides, so hosts without CSF/APF keep their old answer byte-for-byte.
+# WATCHMAN_FIREWALL (env or watchman.conf) pins the backend and skips detection.
+_fw_unit_active() { [[ "$(service_status "$1" 2>/dev/null)" == active ]]; }
+# Resolve the CSF / APF binary: PATH first, then the installers' fixed locations
+# (the same paths cpanel.sh / sectools.sh detect). Prints nothing when absent.
+_fw_csf_bin() {
+    local p; p="$(command -v csf 2>/dev/null)" && { printf '%s\n' "$p"; return 0; }
+    for p in /usr/sbin/csf /etc/csf/csf.pl; do [[ -x "$p" ]] && { printf '%s\n' "$p"; return 0; }; done
+    return 1
+}
+_fw_apf_bin() {
+    local p; p="$(command -v apf 2>/dev/null)" && { printf '%s\n' "$p"; return 0; }
+    for p in /usr/local/sbin/apf /usr/sbin/apf /etc/apf/apf; do [[ -x "$p" ]] && { printf '%s\n' "$p"; return 0; }; done
+    return 1
+}
 watchman_firewall_backend() {
     if [[ -n "${WATCHMAN_FIREWALL:-}" ]]; then printf '%s\n' "$WATCHMAN_FIREWALL"; return; fi
-    local b=""
-    case "$(watchman_family)" in
+    local b="" fam; fam="$(watchman_family)"
+    case "$fam" in
         darwin) b="pf" ;;   # macOS uses pf; Application Firewall is separate but not scriptable here
         debian) command -v ufw          >/dev/null 2>&1 && b="ufw" ;;
         rhel)   command -v firewall-cmd >/dev/null 2>&1 && b="firewalld" ;;
@@ -378,6 +402,22 @@ watchman_firewall_backend() {
     [[ -z "$b" ]] && command -v ufw          >/dev/null 2>&1 && b="ufw"
     [[ -z "$b" ]] && command -v nft          >/dev/null 2>&1 && b="nftables"
     [[ -z "$b" ]] && b="none"
+    # Prefer the firewall that is running (Linux/systemd only; pf is untouched).
+    if [[ "$fam" != darwin ]]; then
+        if _fw_csf_bin >/dev/null && { _fw_unit_active csf || _fw_unit_active lfd; }; then
+            b="csf"
+        elif _fw_apf_bin >/dev/null && _fw_unit_active apf; then
+            b="apf"
+        elif [[ "$b" == firewalld || "$b" == ufw ]] && ! _fw_unit_active "$b"; then
+            # The installed-based pick is not running; switch only to one that is.
+            local alt
+            for alt in firewalld ufw; do
+                [[ "$alt" == "$b" ]] && continue
+                case "$alt" in firewalld) command -v firewall-cmd >/dev/null 2>&1 ;; ufw) command -v ufw >/dev/null 2>&1 ;; esac \
+                    && _fw_unit_active "$alt" && { b="$alt"; break; }
+            done
+        fi
+    fi
     WATCHMAN_FIREWALL="$b"
     printf '%s\n' "$b"
 }
@@ -388,14 +428,39 @@ firewall_list() {
         ufw)       sudo ufw status verbose ;;
         firewalld) sudo firewall-cmd --list-all ;;
         nftables)  sudo nft list ruleset ;;
+        csf)       sudo "$(_fw_csf_bin)" -l ;;   # read-only: prints the live iptables ruleset
+        apf)       sudo "$(_fw_apf_bin)" -l ;;   # read-only: prints the live ruleset
         *) echo "firewall_list: no backend detected" >&2; return 2 ;;
     esac
 }
 
-# MUTATING — review-tier. spec=PORT/proto e.g. 443/tcp
+# CSF and APF take an address plus a comment that is written into csf.deny /
+# deny_hosts.rules. Keep it to a safe charset: it lands in a config file the
+# firewall re-parses on every restart.
+_fw_comment() {
+    local r="${1:-}"; r="${r//[^A-Za-z0-9 ._:\/-]/}"
+    printf 'claude-watchman: %s\n' "${r:-operator-confirmed block}"
+}
+# CSF/APF open and close PORTS through TCP_IN/TCP6_IN (csf.conf) or IG_TCP_CPORTS
+# (conf.apf). That is a config edit, not a command, so it is never generated here.
+_fw_port_manual() {  # <fn> <backend> <spec>
+    case "$2" in
+        csf) echo "$1: CSF manages ports in /etc/csf/csf.conf, not by command. Edit TCP_IN/TCP6_IN (or UDP_IN/UDP6_IN) to change '$3', then run: csf -r. Keep the SSH port in the list; a wrong list can sever access." >&2 ;;
+        apf) echo "$1: APF manages ports in /etc/apf/conf.apf, not by command. Edit IG_TCP_CPORTS (or IG_UDP_CPORTS) to change '$3', then run: apf -r. Keep the SSH port in the list; a wrong list can sever access." >&2 ;;
+    esac
+    return 3
+}
+
+# MUTATING — review-tier. spec=PORT/proto e.g. 443/tcp, or (csf/apf only) an IP/CIDR
+# to allowlist; optional 2nd arg = reason recorded in the csf/apf comment.
 firewall_allow() {
     local spec="$1"
     case "$(watchman_firewall_backend)" in
+        csf|apf)
+            local be; be="$(watchman_firewall_backend)"
+            _fw_spec_is_addr "$spec" || { _fw_port_manual firewall_allow "$be" "$spec"; return; }
+            if [[ "$be" == csf ]]; then sudo "$(_fw_csf_bin)" -a "$spec" "$(_fw_comment "${2:-}")"
+            else sudo "$(_fw_apf_bin)" -a "$spec" "$(_fw_comment "${2:-}")"; fi ;;
         pf)        echo "firewall_allow: pf rules are operator-authored anchor files; refusing to auto-generate. Add a rule to /etc/pf.anchors/watchman and load with: sudo pfctl -f /etc/pf.conf" >&2; return 3 ;;
         ufw)       sudo ufw allow "$spec" ;;
         firewalld) sudo firewall-cmd --permanent --add-port="$spec" && sudo firewall-cmd --reload ;;
@@ -409,9 +474,16 @@ firewall_allow() {
 #     the shape inspect-logs' request_rate_spike remediation proposes, and it needs a
 #     different rule form on every backend (`ufw deny from`, a firewalld rich rule).
 _fw_spec_is_addr() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ || "$1" == *:*:* ]]; }
+#   On csf/apf an address becomes `csf -d <addr> "<comment>"` / `apf -d <addr> "<comment>"`
+#   (optional 2nd arg = reason); a port spec is refused with the config-edit instructions.
 firewall_deny() {  # MUTATING — review-tier
     local spec="$1" fam=ipv4
     case "$(watchman_firewall_backend)" in
+        csf|apf)
+            local be; be="$(watchman_firewall_backend)"
+            _fw_spec_is_addr "$spec" || { _fw_port_manual firewall_deny "$be" "$spec"; return; }
+            if [[ "$be" == csf ]]; then sudo "$(_fw_csf_bin)" -d "$spec" "$(_fw_comment "${2:-}")"
+            else sudo "$(_fw_apf_bin)" -d "$spec" "$(_fw_comment "${2:-}")"; fi ;;
         pf)        echo "firewall_deny: pf rules are operator-authored anchor files; refusing to auto-generate. See /etc/pf.anchors/watchman." >&2; return 3 ;;
         ufw)
             if _fw_spec_is_addr "$spec"; then

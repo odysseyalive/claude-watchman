@@ -152,7 +152,8 @@ _pf_abspath() { command -v "$1" 2>/dev/null || printf '/usr/bin/%s' "$1"; }
 #
 # Mutating functions run through the dispatcher with the WM_APPLY env prefix:
 # `Bash(WM_APPLY=1 bash lib/wm <fn>:*)`. This is FAMILY-BLIND — lib/wm sources distro.sh,
-# whose firewall_allow/deny resolve ufw/firewalld and self-refuse nftables at runtime, so
+# whose firewall_allow/deny resolve ufw/firewalld/csf/apf and self-refuse nftables (and csf/apf
+# port specs, which are csf.conf/conf.apf edits) at runtime, so
 # the preflight no longer enumerates backends here. The WM_APPLY prefix is what lib/wm
 # requires to run a mutator AND what the read-only loop rule (`Bash(bash lib/wm:*)`) cannot
 # match — so granting it here scopes mutation to the FIX profile alone.
