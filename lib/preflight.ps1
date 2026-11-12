@@ -327,6 +327,16 @@ function _pf_path_narrow([string]$p) {
     if ($stem.Contains('*')) { return $false }
     $tree = '^(?i)(/{0,2}[A-Za-z]:|//[A-Za-z]|/)?[\\/]*((Windows|Users|ProgramData|Program Files( \(x86\))?|Windows[\\/]System32)[\\/]*)?$'
     if ($stem -match $tree) { return $false }
+    # A junction or symlink anywhere along the path can point at a whole tree, so any reparse
+    # point among the components that exist on this host makes the path not narrow.
+    $walk = ($stem -replace '^//([A-Za-z])/', '$1:/')
+    while ($walk -and $walk -notmatch '^[A-Za-z]:[\\/]?$') {
+        $item = Get-Item -LiteralPath $walk -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.LinkType -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))) { return $false }
+        $parent = Split-Path -Parent $walk
+        if (-not $parent -or $parent -eq $walk) { break }
+        $walk = $parent
+    }
     return $true
 }
 
@@ -342,15 +352,17 @@ $script:_PF_RO_ANYARGS = '(?i)^(Get-(Service|Process|NetTCPConnection|NetUDPEndp
 $script:_PF_RO_PREFIX  = '(?i)^(sc(\.exe)?\s+(query|qc|queryex)|auditpol\s+/get|bcdedit\s+/enum|manage-bde\s+-status|netsh\s+\S+(\s+\S+)?\s+show)(\s|:|$)'
 # net user/localgroup/share take a positional argument that SETS state (net user bob newpass),
 # so only the bare listing or a single name, optionally /domain, is accepted, as a whole command.
-$script:_PF_RO_EXACT   = '(?i)^((Get-Content|Select-String|Get-ChildItem|Get-Item|Get-Acl|reg\s+query|type|more|findstr|cat|jq|ipconfig|git(\s+-C\s+\S+)?\s+(status|log|diff|show|rev-parse|ls-files|describe))(\s|$)|net\s+(view|session|statistics|(user|localgroup|share)(\s+[^\s/=]+)?)(\s+/domain)?$)'
+$script:_PF_RO_EXACT   = '(?i)^((Get-Content|Select-String|Get-ChildItem|Get-Item|Get-Acl|type|more|findstr|cat|jq|ipconfig|git(\s+-C\s+\S+)?\s+(status|log|diff|show|rev-parse|ls-files|describe))(\s|$)|net\s+(view|session|statistics|(user|localgroup|share)(\s+[^\s/=]+)?)(\s+/domain)?$)'
 function _pf_rule_carryable([string]$rule) {
     if ($rule -match '^Read\((.*)\)$') { return (_pf_path_narrow $Matches[1]) }
     if ($rule -notmatch '^(PowerShell|Bash)\((.*)\)$') { return $false }
     $cmd = $Matches[2].Trim()
     if (-not $cmd -or $cmd.StartsWith('*')) { return $false }
     if ($cmd -match '[|>;&`(){}\r\n]|\$\(|\$\\\(|@\(') { return $false }
-    # Providers that expose secrets rather than files: the registry, environment, variables, certificates.
-    if ($cmd -match '(?i)(HKLM:|HKCU:|HKU:|HKCR:|Registry::|Env:|Variable:|Cert:|Function:)') { return $false }
+    # Arguments must be plain filesystem paths, not provider paths (HKLM:, Env:, Cert:,
+    # Registry::, Microsoft.PowerShell.Core\Environment:: ...). An allowlist: the only
+    # "<name>:" accepted is a single drive letter, and any "::" is refused.
+    if ($cmd.Contains('::') -or $cmd -match '(?i)(^|[\s''"\\/])[A-Za-z][A-Za-z0-9_.\\-]+:') { return $false }
     if (_pf_rule_mutates "PowerShell($cmd)") { return $false }
     if ($cmd -match $script:_PF_RO_ANYARGS) { return $true }
     if ($cmd -match $script:_PF_RO_PREFIX) { return $true }
