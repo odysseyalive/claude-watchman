@@ -344,7 +344,7 @@ GI="$ROOT/.gitignore"
 if [[ -f "$GI" ]] && grep -q 'claude-watchman — never commit these' "$GI"; then
     say ".gitignore already carries the claude-watchman block"
     # The block is only appended once, so entries added in later releases are topped up here.
-    for _gi in journal/liveness-alert.state journal/product-checksums.txt 'journal/pre-update-backup-*/'; do
+    for _gi in journal/liveness-alert.state journal/product-checksums.txt 'journal/pre-update-backup-*/' journal/wp-uploads-baseline.txt; do
         grep -qxF "$_gi" "$GI" || printf '%s\n' "$_gi" >> "$GI"
     done
 else
@@ -364,6 +364,7 @@ journal/findings.db-wal
 journal/findings.db-shm
 journal/network-baseline.txt
 journal/log-offsets.txt
+journal/wp-uploads-baseline.txt
 journal/monitor-offsets.txt
 journal/monitor-state/
 journal/run-ledger.tsv

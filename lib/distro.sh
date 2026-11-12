@@ -731,6 +731,54 @@ webserver_log_paths() {
 # webserver_log_paths in new code — a host can have several.
 log_path_webserver() { webserver_log_paths | head -n1; }
 
+# webserver_docroots — the document-root DIRECTORIES the web servers on this host serve,
+# parsed from the same config roots webserver_log_paths reads: Apache `DocumentRoot` and
+# nginx `root`. Commented lines are skipped (the directive must start the line), values with
+# an unresolved variable or a relative path are dropped, and only directories that exist are
+# printed, canonicalized and deduped, one per line. Read-only. grep -r does NOT follow
+# symlinks below the root, so RHEL's /etc/httpd/logs -> /var/log/httpd is never read; the
+# files Debian links into sites-enabled/ are read at their sites-available/ home instead.
+# Apache is limited to *.conf. WATCHMAN_WP_DOCROOTS (a space/newline separated list)
+# replaces the parse entirely, for fixture testing.
+webserver_docroots() {
+    local -A seen=()
+    local p c server root ar
+    _wdr_add() {
+        local v="${1:-}"
+        v="${v%;}"; v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        [[ "$v" == /* && "$v" != *'$'* ]] || return 0
+        [[ -d "$v" ]] || return 0
+        c="$(realpath -e -- "$v" 2>/dev/null || true)"
+        [[ -n "$c" && -z "${seen[$c]:-}" ]] || return 0
+        seen[$c]=1; printf '%s\n' "$c"
+    }
+    if [[ -n "${WATCHMAN_WP_DOCROOTS:-}" ]]; then
+        for p in $WATCHMAN_WP_DOCROOTS; do _wdr_add "$p"; done
+        return 0
+    fi
+    while IFS=$'\t' read -r server root; do
+        case "$server" in
+            nginx)
+                [[ -n "$root" && -d "$root" ]] || continue
+                while IFS= read -r p; do _wdr_add "$p"; done < <(
+                    { grep -rhE '^[[:space:]]*root[[:space:]]+' "$root" 2>/dev/null || true; } \
+                        | sed -E 's/^[[:space:]]*root[[:space:]]+//; s/[[:space:]]*;.*$//; s/[[:space:]]+#.*$//' )
+                ;;
+            apache)
+                local aroots=()
+                [[ -n "$root" && -d "$root" ]] && aroots+=("$root")
+                for ar in /etc/apache2 /etc/httpd; do [[ -d "$ar" && "$ar" != "$root" ]] && aroots+=("$ar"); done
+                for ar in "${aroots[@]}"; do
+                    while IFS= read -r p; do _wdr_add "$p"; done < <(
+                        { grep -rhiE --include='*.conf' '^[[:space:]]*DocumentRoot[[:space:]]+' "$ar" 2>/dev/null || true; } \
+                            | sed -E 's/^[[:space:]]*[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt][Rr][Oo][Oo][Tt][[:space:]]+//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//' )
+                done
+                ;;
+        esac
+    done < <(webserver_detect)
+    return 0
+}
+
 log_path_lynis() { echo /var/log/lynis-report.dat; }
 
 # --- Mandatory Access Control ----------------------------------------------

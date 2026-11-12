@@ -120,7 +120,7 @@ update_check_run() {
     printf '\n1. Machine artifacts gitignored\n'
     local p
     for p in .env config/watchman.conf journal/findings.db journal/findings.db-wal \
-             journal/findings.db-shm journal/network-baseline.txt journal/log-offsets.txt \
+             journal/findings.db-shm journal/network-baseline.txt journal/log-offsets.txt journal/wp-uploads-baseline.txt \
              journal/monitor-offsets.txt journal/monitor-state \
              journal/run-ledger.tsv journal/run.log journal/.write.lock journal/run.lock \
              journal/liveness-alert.state journal/product-checksums.txt journal/pre-update-backup-x/ \

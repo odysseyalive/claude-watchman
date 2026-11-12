@@ -211,6 +211,7 @@ function _pf_deny_base {
     @(
         'Read(.env)'
         'Read(./.env)'
+        'Read(//**/wp-config.php)'
         'PowerShell(Remove-Item *)'
         'PowerShell(Remove-ItemProperty *)'
         'PowerShell(rmdir *)'

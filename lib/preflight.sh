@@ -340,6 +340,9 @@ _pf_collate_fix() {
 # The Read denies are a backstop beneath narrow grants, not the protection itself: what a
 # session reads goes to the model provider and persists in its transcript, so credentials,
 # private keys, shell history, customer sessions and past transcripts must stay out of it.
+# //**/wp-config.php (WordPress database credentials, at any depth) was tested on Claude
+# Code 2.1.322: with it, Read of a nested wp-config.php is refused; without it the same
+# Read succeeds; a sibling file in the same tree stays readable.
 _pf_deny_base() {
     printf '%s\n' \
         'Read(.env)' \
@@ -368,6 +371,7 @@ _pf_deny_base() {
         'Read(//etc/ssl/private/**)' \
         'Read(//etc/crowdsec/*credentials*)' \
         'Read(//var/lib/php/sessions/**)' \
+        'Read(//**/wp-config.php)' \
         'Bash(rm *)' \
         'Bash(rm -rf *)' \
         'Bash(sudo rm *)' \

@@ -73,7 +73,8 @@ retention_report() {
     mon="$(_ret_dir_bytes "$JOURNAL_DIR/monitor-state")"
     offsets=$(( $(_ret_bytes "$JOURNAL_DIR/log-offsets.txt") \
               + $(_ret_bytes "$JOURNAL_DIR/monitor-offsets.txt") \
-              + $(_ret_bytes "$JOURNAL_DIR/network-baseline.txt") ))
+              + $(_ret_bytes "$JOURNAL_DIR/network-baseline.txt") \
+              + $(_ret_bytes "$JOURNAL_DIR/wp-uploads-baseline.txt") ))
     bbytes=0; bcount=0
     local f
     while IFS= read -r f; do [[ -n "$f" ]] || continue; bbytes=$(( bbytes + $(_ret_bytes "$f") )); bcount=$(( bcount + 1 )); done < <(_ret_backups)
@@ -94,7 +95,7 @@ retention_report() {
 retention_total_mb() {
     local total=0 f
     for f in findings.db findings.db-wal findings.db-shm run.log run-ledger.tsv \
-             log-offsets.txt monitor-offsets.txt network-baseline.txt; do
+             log-offsets.txt monitor-offsets.txt network-baseline.txt wp-uploads-baseline.txt; do
         total=$(( total + $(_ret_bytes "$JOURNAL_DIR/$f") ))
     done
     total=$(( total + $(_ret_dir_bytes "$JOURNAL_DIR/monitor-state") ))

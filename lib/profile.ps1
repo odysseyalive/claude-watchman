@@ -96,6 +96,16 @@ interworx_update_channel:low:-
 interworx_login_failures:medium:-
 interworx_scriptworx_autoupdate_off:low:-
 interworx_softaculous_cron_missing:medium:-
+wordpress_core_version:info:info
+wordpress_config_constants:info:info
+wordpress_plugins:info:info
+wordpress_payment_surface:info:info
+wordpress_wordfence_waf:info:info
+wordpress_exposure:info:info
+wordpress_uploads_php:info:info
+wordpress_uploads_baseline:info:info
+wordpress_uploads_walk_incomplete:info:info
+wordpress_uploads_new_php:high:high
 '@
 
 function _profile_rows {

@@ -55,14 +55,19 @@ cd "$WATCHMAN_ROOT"
 # are NOT listed. schedule_liveness_install/_remove change the system and schedule_liveness_check
 # sends mail and writes its state file, so all three are CLI-only; the read-only
 # schedule_liveness_status stays reachable for diagnostics.
-_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install journal_prune retention_prune_files schedule_run schedule_install schedule_remove schedule_liveness_install schedule_liveness_remove schedule_liveness_check "
+# wordpress_rebaseline overwrites a site's entry in journal/wp-uploads-baseline.txt: it
+# changes only watchman's own state, but that state is the evidence a high
+# wordpress_uploads_new_php finding rests on, so the loop must never be able to erase it
+# (unlike log-offsets.txt, an advisory cursor). wordpress_sites is read-only but prints
+# docroots (usernames, domains) and is operator-only, so it is gated the same way.
+_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install journal_prune retention_prune_files schedule_run schedule_install schedule_remove schedule_liveness_install schedule_liveness_remove schedule_liveness_check wordpress_rebaseline wordpress_sites "
 
 # Source the observe/analyze/report libs in dependency order: core first (the engines below
 # assume distro.sh/profile.sh are already loaded), then the engines, then the report path.
 # CLI-only libs (preflight/update/uninstall/selfcheck) are intentionally NOT sourced.
 # shellcheck source=/dev/null
 for _lib in journal.sh distro.sh profile.sh io-courtesy.sh \
-            capacity.sh retention.sh webstats.sh security_currency.sh cpanel.sh interworx.sh sectools.sh shellhist.sh \
+            capacity.sh retention.sh webstats.sh security_currency.sh cpanel.sh interworx.sh wordpress.sh sectools.sh shellhist.sh \
             monitor.sh smtp.sh schedule.sh; do
     [[ -r "lib/$_lib" ]] && source "lib/$_lib"
 done

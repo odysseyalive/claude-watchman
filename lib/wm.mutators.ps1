@@ -30,6 +30,8 @@ $script:WM_MUTATORS = @(
     'schedule_run'
     'schedule_install'
     'schedule_remove'
+    'wordpress_rebaseline'
+    'wordpress_sites'
 )
 
 function _wm_is_mutator([string]$fn) { return $script:WM_MUTATORS -contains $fn }

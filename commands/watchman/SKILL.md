@@ -52,7 +52,8 @@ For any other unrecognized argument, list the in-session verbs and stop.
    `skills/grammar/audit-system`, `skills/grammar/inventory-services`,
    `skills/grammar/inventory-security-tools`,
    `skills/grammar/inspect-web-config`, `skills/grammar/inspect-cpanel`,
-   `skills/grammar/inspect-interworx`, `skills/grammar/inspect-logs`,
+   `skills/grammar/inspect-interworx`, `skills/grammar/inspect-wordpress`,
+   `skills/grammar/inspect-logs`,
    `skills/grammar/check-log-retention`, `skills/grammar/check-shell-history`,
    `skills/grammar/check-security-currency`, `skills/grammar/check-capacity`,
    `skills/grammar/check-data-footprint`.
