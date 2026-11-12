@@ -491,7 +491,7 @@ _pf_replace_settings() {   # <target> <new-file>: back up target if it changes, 
 # from an ordinary-looking argument (sort, uniq, date, hostname), are on no list, so
 # they are always held.
 _PF_RO_ANYARGS='ls|stat|df|du|free|uptime|id|whoami|uname|lsof|last|lastb|lastlog|who|w|dpkg-query|lsattr|lsblk|findmnt|echo|printf|true|which|readlink|realpath|basename|dirname|nproc|lscpu|lsmod'
-_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v|nft list|ufw status|resolvectl (status|statistics|query|dns|domain)|cscli (decisions|alerts) (list|inspect)|fail2ban-client status'
+_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v|resolvectl (status|statistics|query)|cscli (decisions|alerts) (list|inspect)|fail2ban-client status'
 _PF_RO_EXACT='cat|head|tail|wc|grep|egrep|fgrep|zgrep|zcat|cut|tr|jq|diff|cmp|file|md5sum|sha1sum|sha256sum|ss|ps|getent|set|shellcheck|journalctl|sysctl|test|ausearch|aureport|git( -C [^ ]+)? (status|log|diff|show|rev-parse|ls-files|describe)'
 _pf_rule_carryable() {
     local r="$1" cmd
@@ -507,8 +507,10 @@ _pf_rule_carryable() {
        || "$cmd" == *'|'* || "$cmd" == *';'* || "$cmd" == *'&'* || "$cmd" == *$'\n'* ]] && return 1
     # Listing forms of tools whose other flags change state, accepted only verbatim.
     [[ "$cmd" =~ ^crontab(\ -u\ [a-z_][a-z0-9_-]*)?\ -l$ || "$cmd" == 'auditctl -l' || "$cmd" == 'auditctl -s' ]] && return 0
-    # The read subcommand of a firewall front-end, whose other subcommands are in the mutation list.
-    [[ "$cmd" =~ ^(nft\ list|ufw\ status)(\ |$) ]] && return 0
+    # Firewall and resolver listings, verbatim only: nft reads options anywhere on the line
+    # (nft list ruleset -f FILE runs FILE), and resolvectl dns/domain with arguments SET them.
+    [[ "$cmd" =~ ^nft\ list\ (ruleset|tables|chains|sets|counters)$ || "$cmd" =~ ^nft\ list\ table\ [a-z0-9_]+\ [a-zA-Z0-9_-]+$ \
+       || "$cmd" =~ ^ufw\ status(\ verbose|\ numbered)?$ || "$cmd" =~ ^resolvectl\ (dns|domain)$ ]] && return 0
     _pf_rule_mutates "Bash($cmd)" && return 1
     [[ "$cmd" =~ ^(${_PF_RO_ANYARGS})(\ |:|$) ]] && return 0
     [[ "$cmd" =~ ^(${_PF_RO_PREFIX})(\ |:|$) ]] && return 0
