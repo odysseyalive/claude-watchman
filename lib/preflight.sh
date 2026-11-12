@@ -491,8 +491,8 @@ _pf_replace_settings() {   # <target> <new-file>: back up target if it changes, 
 # from an ordinary-looking argument (sort, uniq, date, hostname), are on no list, so
 # they are always held.
 _PF_RO_ANYARGS='ls|stat|df|du|free|uptime|id|whoami|uname|lsof|last|lastb|lastlog|who|w|dpkg-query|lsattr|lsblk|findmnt|echo|printf|true|which|readlink|realpath|basename|dirname|nproc|lscpu|lsmod'
-_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v|resolvectl (status|statistics|query)|cscli (decisions|alerts) (list|inspect)|fail2ban-client status'
-_PF_RO_EXACT='cat|head|tail|wc|grep|egrep|fgrep|zgrep|zcat|cut|tr|jq|diff|cmp|file|md5sum|sha1sum|sha256sum|ss|ps|getent|set|shellcheck|journalctl|sysctl|test|ausearch|aureport|git( -C [^ ]+)? (status|log|diff|show|rev-parse|ls-files|describe)'
+_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v|resolvectl (status|statistics)|cscli (decisions|alerts) (list|inspect)|fail2ban-client status'
+_PF_RO_EXACT='cat|head|tail|wc|grep|egrep|fgrep|zgrep|zcat|cut|tr|jq|diff|cmp|file|md5sum|sha1sum|sha256sum|ss|ps|getent|set|shellcheck|journalctl|sysctl|test|ausearch|aureport|resolvectl query|git( -C [^ ]+)? (status|log|diff|show|rev-parse|ls-files|describe)'
 _pf_rule_carryable() {
     local r="$1" cmd
     case "$r" in
@@ -531,6 +531,8 @@ _pf_rule_mutates() {
     cmd="${cmd#sudo }"
     [[ "$cmd" =~ ^journalctl\ .*--(vacuum|rotate|flush|sync|relinquish|setup-keys) ]] && return 0
     [[ "$cmd" =~ ^ss\ .*(-K|--kill) ]] && return 0
+    # ausearch --checkpoint writes a checkpoint file; aureport/ausearch -if only read.
+    [[ "$cmd" =~ ^(ausearch|aureport)\ .*(--checkpoint|(^|\ )-ck?(\ |$)) ]] && return 0
     # git can write a file or run a program from a read subcommand's flags.
     [[ "$cmd" =~ ^git\ .*(--output|--no-index|--ext-diff|--textconv|--exec|--upload-pack|--receive-pack|\ -c\ |--config) ]] && return 0
     # Secrets rather than changes, held the same way: the shadow databases, and process environments.
