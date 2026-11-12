@@ -709,6 +709,30 @@ webserver_log_paths() {
         esac
     done < <(webserver_detect)
 
+    # Containerized web server: the config lives inside the container, so
+    # webserver_detect finds no /etc/nginx on the host, no branch above runs, and the
+    # well-known dirs below do not exist either — leaving only the bare last-resort
+    # default, which is why rate-offender detection was silently blind (finding #809).
+    # Ask the container runtime which HOST directories it bind-mounts into a running
+    # web-server container and keep the ones that actually hold a log file. Read-only,
+    # and a no-op when no runtime is installed or the daemon is unreachable.
+    local _rt _cid _src
+    for _rt in docker podman; do
+        command -v "$_rt" >/dev/null 2>&1 || continue
+        while IFS= read -r _cid; do
+            [[ -n "$_cid" ]] || continue
+            while IFS= read -r _src; do
+                [[ -n "$_src" && -d "$_src" ]] || continue
+                if compgen -G "$_src/*access*log*" >/dev/null 2>&1 \
+                   || compgen -G "$_src/*error*log*" >/dev/null 2>&1; then
+                    _wlp_add_dir "$_src"
+                fi
+            done < <("$_rt" inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "$_cid" 2>/dev/null)
+        done < <("$_rt" ps --format '{{.ID}} {{.Image}} {{.Names}}' 2>/dev/null \
+                    | grep -Ei 'nginx|apache|httpd|caddy|lighttpd|openresty|traefik' \
+                    | awk '{print $1}')
+    done
+
     # Safety-net union: well-known dirs that actually exist on disk.
     # Includes macOS Homebrew var paths (both Intel /usr/local and Apple Silicon /opt/homebrew).
     local _bp=""

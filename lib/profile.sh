@@ -142,5 +142,7 @@ profile_log_direction() {  # echoes: inbound | outbound
 # operator opting in. On a workstation, 'safe' fixes may be batch-applied when the
 # operator approves. (review/manual are NEVER batched in either — risk-tier rule.)
 profile_allows_safe_batch() {
-    [[ "$(watchman_profile)" == workstation ]]
+    # AND, never a replacement: WATCHMAN_SAFE_AUTOFIX=no narrows the batch even on a
+    # workstation (#951). A gate on unattended fixes may only be narrowed.
+    [[ "$(watchman_profile)" == workstation && "${WATCHMAN_SAFE_AUTOFIX:-yes}" != no ]]
 }

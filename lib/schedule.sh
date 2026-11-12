@@ -146,6 +146,12 @@ _sched_run_pass() {
             "$started" "$cost" "$intok" "$outtok" "$cachetok" "$dur" "$turns" "$iserr" >>"$SCHED_LEDGER"
         echo "watchman run: pass complete — cost \$$cost, tokens ${intok}/${outtok} in/out, ${turns} turns (rc=$rc)" >&2
         echo "[$started] watchman run: cost \$$cost tokens ${intok}/${outtok} turns ${turns} rc=$rc" >>"$SCHED_RUNLOG"
+        # Keep the WHY of a failed pass: Claude's own error text lives only in this JSON,
+        # which is deleted below (#1005: 19 alerts said "failed" and none said why).
+        if [[ "$rc" != 0 || "$iserr" == true ]]; then
+            jq -r --arg s "$started" '"[" + $s + "] watchman run: error: " + (.subtype // "") + " " + ((.result // "") | tostring | .[0:500])' \
+                "$out" >>"$SCHED_RUNLOG" 2>/dev/null || true
+        fi
         _sched_assert_pass_healthy "$rc" "$iserr" "$outtok" "$turns" "$sid" "$started" "$since_utc" || true
     else
         echo "watchman run: pass complete (rc=$rc; cost not recorded — jq missing or no JSON output)." >&2

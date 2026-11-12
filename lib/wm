@@ -63,6 +63,22 @@ cd "$WATCHMAN_ROOT"
 # webserver_docroots, which prints the same paths.
 _WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install journal_prune retention_prune_files schedule_run schedule_install schedule_remove schedule_liveness_install schedule_liveness_remove schedule_liveness_check wordpress_rebaseline wordpress_sites webserver_docroots "
 
+# Load the operator's tuning (config/watchman.conf) BEFORE the libs, so every
+# ${WATCHMAN_*:-default} resolves to the configured value. Explicit env WINS over the
+# file (env override is the documented testing path), so snapshot any WATCHMAN_* already
+# set, source the file, then restore the snapshot.
+_wm_conf="${WATCHMAN_CONF:-$WATCHMAN_ROOT/config/watchman.conf}"
+if [[ -r "$_wm_conf" ]]; then
+    _wm_env_snap="$(declare -px | grep -E '^declare -[^ ]*x[^ ]* WATCHMAN_' || true)"
+    set -a
+    # shellcheck source=/dev/null
+    source "$_wm_conf"
+    set +a
+    [[ -n "$_wm_env_snap" ]] && eval "$_wm_env_snap"
+    unset _wm_env_snap
+fi
+unset _wm_conf
+
 # Source the observe/analyze/report libs in dependency order: core first (the engines below
 # assume distro.sh/profile.sh are already loaded), then the engines, then the report path.
 # CLI-only libs (preflight/update/uninstall/selfcheck) are intentionally NOT sourced.
