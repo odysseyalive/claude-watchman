@@ -728,13 +728,20 @@ integrity_verify_all() {
 # --- Control panel (cPanel/WHM) --------------------------------------------
 # cPanel is orthogonal to the distro family (it rides on RHEL/Ubuntu), so it is a
 # separate attribute, not a fourth family. Detection is unambiguous: the cpanel
-# binary at a fixed path. control_panel_detect echoes "cpanel" or "" so a skill/
-# profile can branch, and the preflight (which sources this file) can resolve the
-# cpanel_log_paths read token to grant Read on the real cPanel log dirs.
-control_panel_detect() {   # echoes: cpanel | (empty)
+# binary at a fixed path. control_panel_detect echoes "cpanel" (or "interworx", see
+# below) or "" so a skill/profile can branch, and the preflight (which sources this
+# file) can resolve the cpanel_log_paths read token to grant Read on the real cPanel log dirs.
+control_panel_detect() {   # echoes: cpanel | interworx | (empty)
     if [[ -n "${WATCHMAN_CONTROL_PANEL:-}" ]]; then printf '%s\n' "$WATCHMAN_CONTROL_PANEL"; return; fi
     local cp=""
     [[ -x /usr/local/cpanel/cpanel ]] && cp="cpanel"
+    # InterWorx (NodeWorx/SiteWorx) is checked second so cPanel keeps priority on the
+    # (unsupported) chance both are present. Either the setuid CLI wrapper or the
+    # panel's INI marks it; the INI holds DB credentials, so it is only tested for
+    # readability here, never read.
+    if [[ -z "$cp" ]] && { [[ -x /usr/bin/nodeworx ]] || [[ -r /usr/local/interworx/iworx.ini ]]; }; then
+        cp="interworx"
+    fi
     WATCHMAN_CONTROL_PANEL="$cp"
     printf '%s\n' "$cp"
 }
@@ -754,4 +761,46 @@ cpanel_log_paths() {
              /usr/local/apache/domlogs /etc/apache2/logs/domlogs; do
         [[ -d "$d" ]] && printf '%s\n' "$d"
     done
+}
+
+# --- Control panel (InterWorx / NodeWorx) ----------------------------------
+# InterWorx is RHEL-family only (EL8/EL9), so the OS resolver already covers it; the
+# panel-specific observe engine lives in lib/interworx.sh (iwscan).
+#
+# The installed InterWorx version (empty if unknown). IW_VERSION overrides it for
+# testing. The RPM is authoritative; the [iworx] version key in iworx.ini is the
+# fallback, read by exact section + anchored key only (the file holds DB credentials).
+# Only a dotted-numeric value is ever echoed.
+interworx_version() {
+    local v="${IW_VERSION:-}"
+    if [[ -z "$v" ]] && command -v rpm >/dev/null 2>&1; then
+        v="$(timeout 20 rpm -q --qf '%{VERSION}' interworx 2>/dev/null || true)"
+    fi
+    if [[ ! "$v" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+        v=""
+        local ini="${IW_ROOT:-/usr/local/interworx}/iworx.ini"
+        if [[ -r "$ini" ]]; then
+            v="$(awk '
+                /^[[:space:]]*\[/ { sec=$0; gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", sec); next }
+                sec=="iworx" && /^[[:space:]]*version[[:space:]]*=/ {
+                    sub(/^[^=]*=[[:space:]]*/, ""); gsub(/["\047[:space:]]/, ""); print; exit }' "$ini" 2>/dev/null || true)"
+        fi
+    fi
+    [[ "$v" =~ ^[0-9]+(\.[0-9]+)+$ ]] && printf '%s\n' "$v"
+    return 0
+}
+
+# The DIRECTORIES holding InterWorx-specific logs a model might need to read: the
+# daemontools multilog trees for qmail (TAI64-stamped; read with tai64nlocal). The
+# panel's own log dir (<IW_ROOT>/var/log) is deliberately EXCLUDED: api.log and
+# login.log live there and iwscan parses what it needs inside bash. No manifest
+# declares this token today (inspect-interworx needs no model Read), so it grants
+# nothing until a skill opts in.
+interworx_log_paths() {
+    [[ "$(control_panel_detect)" == interworx ]] || return 0
+    local d
+    for d in /var/log/smtp /var/log/send; do
+        [[ -d "$d" ]] && printf '%s\n' "$d"
+    done
+    return 0
 }

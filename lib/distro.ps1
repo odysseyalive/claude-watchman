@@ -267,6 +267,9 @@ function integrity_verify_all {
 function control_panel_detect { return '' }
 function cpanel_version { return '' }
 function cpanel_log_paths { return }
+# InterWorx/NodeWorx is Linux-only (EL8/EL9); on Windows it self-gates to empty the same way.
+function interworx_version { return '' }
+function interworx_log_paths { return }
 
 # --- Crash / OOM postmortem events (diagnose-crash on Windows) --------------
 # The journald-equivalent for diagnose-crash. Walks the Windows event logs for the crash/abnormal

@@ -77,6 +77,20 @@ cpanel_mail_frozen:medium:-
 cpanel_csf_orphaned:medium:-
 cpanel_imunify_malware:high:-
 cpanel_rpm_altered:high:-
+interworx_eol:high:-
+interworx_cve_2025_13057:critical:-
+interworx_eol_php:medium:-
+interworx_php_socket_drift:high:-
+interworx_service_down:high:-
+interworx_service_flapping:high:-
+interworx_panel_unit_down:high:-
+interworx_panel_plaintext:high:-
+interworx_csf_testing:high:-
+interworx_apf_devel:high:-
+interworx_csf_integration_off:medium:-
+interworx_mail_queue_spike:high:-
+interworx_autohotfix_off:medium:-
+interworx_update_channel:low:-
 '
 
 # Echo the applicable check_ids for the profile.

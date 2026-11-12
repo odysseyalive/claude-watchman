@@ -43,6 +43,7 @@ _ST_REGISTRY='
 fail2ban|brute_force|security|fail2ban
 sshguard|brute_force|security|sshguard
 crowdsec|brute_force|security|crowdsec
+csf-lfd|brute_force|security|lfd
 rkhunter|rootkit|integrity|-
 chkrootkit|rootkit|integrity|-
 auditd|host_audit|security|auditd
@@ -72,6 +73,7 @@ _st_present() {
         fail2ban)    command -v fail2ban-client >/dev/null 2>&1 || pkg_is_installed fail2ban 2>/dev/null ;;
         sshguard)    command -v sshguard        >/dev/null 2>&1 || pkg_is_installed sshguard 2>/dev/null ;;
         crowdsec)    command -v cscli           >/dev/null 2>&1 || pkg_is_installed crowdsec 2>/dev/null ;;
+        csf-lfd)     [[ -x /usr/sbin/csf || -x /etc/csf/csf.pl ]] ;;
         rkhunter)    command -v rkhunter         >/dev/null 2>&1 || pkg_is_installed rkhunter 2>/dev/null ;;
         chkrootkit)  command -v chkrootkit       >/dev/null 2>&1 || pkg_is_installed chkrootkit 2>/dev/null ;;
         auditd)      command -v auditctl         >/dev/null 2>&1 || pkg_is_installed auditd 2>/dev/null || pkg_is_installed audit 2>/dev/null ;;
@@ -111,6 +113,10 @@ _st_observe() {
             echo "installed but the sshguard service is inactive"; return 1 ;;
         crowdsec)
             echo "present — inbound alerts via inspect-logs, hub freshness via check-security-currency"; return 0 ;;
+        csf-lfd)
+            # CSF is the firewall; LFD is its login-failure daemon (the brute-force half).
+            _st_unit_active lfd && { echo "active (LFD login-failure daemon running)"; return 0; }
+            echo "CSF is installed but the lfd service is inactive, so failed logins are not being blocked"; return 1 ;;
         rkhunter)
             local log=/var/log/rkhunter.log warns
             if [[ -r "$log" ]]; then
@@ -187,7 +193,7 @@ sectools_scan() {
     # installing software is the operator's decision; the loop can never apply it.
     _st_gap brute_force   defense_gap_bruteforce  security  "$prof" "${satisfied[brute_force]:-}" \
         "No brute-force protection is installed" \
-        "Nothing is throttling password-guessing against SSH or the web server — no fail2ban, CrowdSec, or sshguard is present. On a public-facing host this is a primary path to credential compromise." \
+        "Nothing is throttling password-guessing against SSH or the web server — no fail2ban, CrowdSec, sshguard, or CSF/LFD is present. On a public-facing host this is a primary path to credential compromise." \
         "Install one (operator's choice): $(pkg_install_cmd) fail2ban — or deploy CrowdSec."
     _st_gap rootkit       defense_gap_rootkit     integrity "$prof" "${satisfied[rootkit]:-}" \
         "No rootkit checker is installed" \

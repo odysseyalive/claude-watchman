@@ -28,6 +28,8 @@ lib/cpanel.ps1
 lib/cpanel.sh
 lib/distro.ps1
 lib/distro.sh
+lib/interworx.ps1
+lib/interworx.sh
 lib/io-courtesy.ps1
 lib/io-courtesy.sh
 lib/journal.ps1
@@ -78,6 +80,8 @@ skills/grammar/check-shell-history/manifest.json
 skills/grammar/check-shell-history/SKILL.md
 skills/grammar/inspect-cpanel/manifest.json
 skills/grammar/inspect-cpanel/SKILL.md
+skills/grammar/inspect-interworx/manifest.json
+skills/grammar/inspect-interworx/SKILL.md
 skills/grammar/inspect-logs/manifest.json
 skills/grammar/inspect-logs/SKILL.md
 skills/grammar/inspect-web-config/manifest.json

@@ -62,7 +62,7 @@ _WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_i
 # CLI-only libs (preflight/update/uninstall/selfcheck) are intentionally NOT sourced.
 # shellcheck source=/dev/null
 for _lib in journal.sh distro.sh profile.sh io-courtesy.sh \
-            capacity.sh retention.sh webstats.sh security_currency.sh cpanel.sh sectools.sh shellhist.sh \
+            capacity.sh retention.sh webstats.sh security_currency.sh cpanel.sh interworx.sh sectools.sh shellhist.sh \
             monitor.sh smtp.sh schedule.sh; do
     [[ -r "lib/$_lib" ]] && source "lib/$_lib"
 done
