@@ -1,6 +1,6 @@
 ---
 name: inspect-interworx
-description: "OBSERVE (InterWorx/NodeWorx only): read the InterWorx control plane read-only — panel version EOL and advisories, EOL PHP pools, PHP-FPM socket drift (503s), daemontools/panel service health, plaintext panel login on 2080, CSF/APF test mode, panel brute-force wiring, failed panel logins, qmail queue, hotfix and app auto-update, pre-release channel. Self-gates to a no-op off InterWorx boxes. Detect + propose; never edits panel config or applies a fix."
+description: "OBSERVE (InterWorx/NodeWorx only): read the InterWorx control plane read-only — panel version EOL and advisories, EOL PHP pools, PHP-FPM socket drift (503s), daemontools/panel service health, plaintext panel login on 2080, CSF/APF test mode, panel brute-force wiring, failed panel logins, qmail queue, hotfix and ScriptWorx auto-update, Softaculous upgrade cron, pre-release channel. Self-gates to a no-op off InterWorx boxes. Detect + propose; never edits panel config or applies a fix."
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash
 ---
@@ -106,12 +106,25 @@ engine returns immediately, so it is safe to run everywhere.
   `/etc/opt/remi/phpNN/php-fpm.d/<user>.conf`, sockets `/var/run/<user>-remi-safe-phpNN.sock`).
 - **Configs are rebuilt by the panel.** Never hand-edit a vhost or pool; route every fix
   through NodeWorx/SiteWorx.
+- **Two app installers, often only one in use.** ScriptWorx is the panel's built-in
+  installer (`iworx.ini [scriptworx]`, installs under `/usr/local/interworx/var/scriptworx/`);
+  it is frequently disabled (`status="0"`), and then its `autoupdate` setting means nothing.
+  Softaculous (`/usr/local/softaculous`, per-user installs in
+  `~/.softaculous/installations.php`) upgrades apps that have auto-upgrade enabled from its
+  daily `cron.php` job in `/etc/cron.d/softaculous*` (sometimes named `softaculous2`). Many
+  sites are installed by neither; don't assume an installer manages a site.
 
 ## Not yet covered (held back, pending verification)
 
 - **`iworx.ini` `[update] autoiworx` / `autoos`** and **`[scriptworx] updatecheck`**: value
-  semantics unverified. Only `[update] autohotfix` and `[scriptworx] autoupdate` set to an
-  explicit off value are flagged.
+  semantics unverified. Flagged only: `[update] autohotfix` explicitly off, and
+  `[scriptworx] autoupdate` explicitly off while ScriptWorx is explicitly enabled and manages
+  installs.
+- **Per-install Softaculous auto-upgrade flags** in `installations.php`: the field name is
+  unconfirmed, so only the server-wide cron is checked (counts only; the file is never parsed).
+- **WordPress core auto-update disabled in `wp-config.php`** (`AUTOMATIC_UPDATER_DISABLED`,
+  `WP_AUTO_UPDATE_CORE`): deliberately not read, because `wp-config.php` holds database
+  credentials. Needs an operator decision before it is added.
 - **`iworx-filelist.txt` integrity verification** (the RPM-style `%attr` manifest of panel files).
 - **Other advisories by version** (IWX-CVE-2023-11439, IWX-CVE-2023-10947, and the
   IW7 < 7.13.54 side of IWX-CVE-2025-13057). Only IW6/IW7 end of life and IW8 < 8.0.30 are flagged.

@@ -404,15 +404,46 @@ iwscan() {
     fi
 
     # 11. Panel-installed web application auto-updates off ([scriptworx] autoupdate).
-    #     ScriptWorx is the panel's one-click app installer; with autoupdate off, apps it
-    #     installed (CMSs and the like) are not updated by the panel. Explicit off only.
-    case "$(_iw_ini_get "$ini" scriptworx autoupdate)" in
-        0|false|off|no)
-            _iw_emit config low manual interworx_scriptworx_autoupdate_off iworx-scriptworx \
-                "Auto-updates for panel-installed web apps are off" \
-                "iworx.ini [scriptworx] autoupdate is off, so web applications installed through the panel's app installer are not updated automatically. An outdated CMS is a common way into a hosting server." \
-                "If sites use panel-installed apps, either turn ScriptWorx auto-updates on in NodeWorx or confirm each site owner keeps their app patched."
-            ;;
-    esac
+    #     ScriptWorx is the panel's built-in one-click app installer. autoupdate=0 only
+    #     matters when ScriptWorx itself is explicitly enabled ([scriptworx] status=1|true|on|yes; a missing key is not proof it is on) and it manages
+    #     something: a disabled installer, or an existing-but-empty var/scriptworx (no
+    #     managed installs), leaves nothing for autoupdate to act on. Explicit off only.
+    local sw_status sw_dir="$root/var/scriptworx"
+    sw_status="$(_iw_ini_get "$ini" scriptworx status)"
+    case "$sw_status" in 1|true|on|yes) sw_status=on ;; *) sw_status="" ;; esac
+    if [[ "$sw_status" == on ]] && ! { [[ -d "$sw_dir" ]] && [[ -z "$(ls -A "$sw_dir" 2>/dev/null || true)" ]]; }; then
+        case "$(_iw_ini_get "$ini" scriptworx autoupdate)" in
+            0|false|off|no)
+                _iw_emit config low manual interworx_scriptworx_autoupdate_off iworx-scriptworx \
+                    "Auto-updates for panel-installed web apps are off" \
+                    "iworx.ini [scriptworx] is enabled but its autoupdate is off, so web applications installed through ScriptWorx are not updated automatically. An outdated CMS is a common way into a hosting server." \
+                    "Either turn ScriptWorx auto-updates on in NodeWorx or confirm each site owner keeps their ScriptWorx-installed app patched."
+                ;;
+        esac
+    fi
+
+    # 12. Softaculous auto-upgrade cron missing. Many InterWorx boxes use Softaculous as the
+    #     app installer instead of ScriptWorx. Per Softaculous's docs, an installation with
+    #     auto-upgrade enabled is upgraded "when the Softaculous CRON is executed on the
+    #     server (every 24 hours)", i.e. cron.php (on InterWorx:
+    #     /home/interworx/bin/php /usr/local/softaculous/cron.php). The entry lives in
+    #     /etc/cron.d/softaculous*; on some boxes the file is named softaculous2. Only matters when some account has Softaculous
+    #     installs (a non-empty ~/.softaculous/installations.php). Counts only: no paths,
+    #     users or domains are emitted, and installations.php is never parsed.
+    local sdir="${IW_SOFTACULOUS_DIR:-/usr/local/softaculous}"
+    local scrond="${IW_CRON_D:-/etc/cron.d}"
+    local homes="${IW_HOME_DIR:-/home}"
+    if [[ -d "$sdir" ]]; then
+        local sinst=0 sf
+        for sf in "$homes"/*/.softaculous/installations.php; do
+            [[ -s "$sf" ]] && sinst=$((sinst + 1))
+        done
+        if (( sinst > 0 )) && ! grep -qsE '^[[:space:]]*[^#[:space:]].*softaculous/cron\.php' "$scrond"/softaculous* 2>/dev/null; then
+            _iw_emit config medium review interworx_softaculous_cron_missing softaculous-cron \
+                "Softaculous auto-upgrade cron is missing" \
+                "$sinst account(s) have Softaculous-managed app installs, but no /etc/cron.d/softaculous* entry runs Softaculous's cron.php, which is the daily job that applies its automatic app upgrades. Apps installed through Softaculous will fall behind on security releases." \
+                "Restore the Softaculous cron (reinstalling or updating Softaculous recreates it), then confirm cron.php runs daily."
+        fi
+    fi
     return 0
 }

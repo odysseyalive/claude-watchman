@@ -93,6 +93,7 @@ interworx_autohotfix_off:medium:-
 interworx_update_channel:low:-
 interworx_login_failures:medium:-
 interworx_scriptworx_autoupdate_off:low:-
+interworx_softaculous_cron_missing:medium:-
 '
 
 # Echo the applicable check_ids for the profile.
