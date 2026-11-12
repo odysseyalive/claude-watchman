@@ -106,6 +106,7 @@ wordpress_uploads_php:info:info
 wordpress_uploads_baseline:info:info
 wordpress_uploads_walk_incomplete:info:info
 wordpress_uploads_new_php:high:high
+wordpress_uploads_php_flood:high:high
 '@
 
 function _profile_rows {

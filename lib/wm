@@ -59,8 +59,9 @@ cd "$WATCHMAN_ROOT"
 # changes only watchman's own state, but that state is the evidence a high
 # wordpress_uploads_new_php finding rests on, so the loop must never be able to erase it
 # (unlike log-offsets.txt, an advisory cursor). wordpress_sites is read-only but prints
-# docroots (usernames, domains) and is operator-only, so it is gated the same way.
-_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install journal_prune retention_prune_files schedule_run schedule_install schedule_remove schedule_liveness_install schedule_liveness_remove schedule_liveness_check wordpress_rebaseline wordpress_sites "
+# docroots (usernames, domains) and is operator-only, so it is gated the same way, as is
+# webserver_docroots, which prints the same paths.
+_WM_MUTATORS=" firewall_allow firewall_deny service_enable service_restart pkg_install journal_prune retention_prune_files schedule_run schedule_install schedule_remove schedule_liveness_install schedule_liveness_remove schedule_liveness_check wordpress_rebaseline wordpress_sites webserver_docroots "
 
 # Source the observe/analyze/report libs in dependency order: core first (the engines below
 # assume distro.sh/profile.sh are already loaded), then the engines, then the report path.
@@ -75,6 +76,13 @@ done
 fn="${1:-}"; shift || true
 if [[ -z "$fn" ]]; then
     echo "wm: usage: bash lib/wm <function> [args…]   (mutations: WM_APPLY=1 bash lib/wm <fn> …)" >&2
+    exit 2
+fi
+# Private helpers (leading underscore) are internals of the public functions, never an
+# entrypoint: calling one directly would bypass the _WM_MUTATORS gate (e.g. a baseline
+# writer behind a gated public function).
+if [[ "$fn" == _* ]]; then
+    echo "wm: '$fn' is a private helper, not a dispatchable function." >&2
     exit 2
 fi
 if [[ "$(type -t "$fn" || true)" != function ]]; then

@@ -58,6 +58,16 @@ _wp_slug_ok() { [[ "$1" =~ ^[a-z0-9._-]+$ && ${#1} -le 100 ]]; }
 
 # A path relative to uploads, safe to show: plain characters only, bounded length.
 _wp_relpath_ok() { [[ "$1" =~ ^[A-Za-z0-9._/-]+$ && ${#1} -le 200 ]]; }
+_wp_label_ok() { [[ "$1" =~ ^wp-[0-9a-f]{10}$ ]]; }
+
+# Bounded grep of a site-controlled file: only a regular file (so never a FIFO, device or
+# /dev/zero symlink target), and only its first 1 MiB, so a hostile docroot cannot hang
+# or balloon a scan. Usage: _wp_grep <file> <grep args...>; prints whatever grep prints.
+_wp_grep() {
+    local f="$1"; shift
+    [[ -f "$f" ]] || return 1
+    head -c 1048576 -- "$f" 2>/dev/null | grep "$@"
+}
 
 # wp-config.php location: the docroot, or (as WordPress itself allows) its parent.
 _wp_config_path() {
@@ -75,8 +85,9 @@ _wp_config_path() {
 # pathkey = sha256(relpath), so a hostile file name never has to be stored or printed.
 _wp_uploads_walk() {
     local up="$1"
-    local maxd="${WATCHMAN_WP_UPLOADS_MAXDEPTH:-12}" cap="${WATCHMAN_WP_UPLOADS_MAX_FILES:-5000}"
-    [[ "$maxd" =~ ^[0-9]+$ ]] || maxd=12
+    # No depth limit by default: a depth cap would let a webshell hide one level deeper.
+    local maxd="${WATCHMAN_WP_UPLOADS_MAXDEPTH:-100000}" cap="${WATCHMAN_WP_UPLOADS_MAX_FILES:-5000}"
+    [[ "$maxd" =~ ^[0-9]+$ ]] || maxd=100000
     [[ "$cap" =~ ^[0-9]+$ ]] || cap=5000
     local runner=()
     [[ "$(type -t io_run || true)" == function ]] && runner=(io_run)
@@ -136,11 +147,12 @@ _wp_baseline_has() {
 # Atomic: temp file beside the baseline, then mv. Never touches a docroot.
 _wp_baseline_write() {
     local label="$1" f dir tmp k shown
+    _wp_label_ok "$label" || return 1
     f="$(_wp_baseline_file)"; dir="$(dirname "$f")"
     [[ -d "$dir" && -w "$dir" ]] || return 1
     tmp="$(mktemp "$f.XXXXXX" 2>/dev/null)" || return 1
     {
-        [[ -r "$f" ]] && { grep -v "^${label}"$'\t' "$f" 2>/dev/null || true; }
+        [[ -r "$f" ]] && { awk -F'\t' -v l="$label" '$1 != l' "$f" 2>/dev/null || true; }
         printf '%s\t#baseline\t%s\t%s\t-\n' "$label" "${#W_SZ[@]}" "$(date +%F)"
         for k in "${!W_SZ[@]}"; do
             shown="${W_REL[$k]}"; _wp_relpath_ok "$shown" || shown="-"
@@ -157,7 +169,7 @@ _wp_scan_site() {
 
     # 1. Core version: only a dotted number is ever emitted.
     local ver
-    ver="$( { grep -m1 -E '^[[:space:]]*\$wp_version[[:space:]]*=' "$d/wp-includes/version.php" 2>/dev/null || true; } \
+    ver="$( { _wp_grep "$d/wp-includes/version.php" -m1 -E '^[[:space:]]*\$wp_version[[:space:]]*=' 2>/dev/null || true; } \
             | sed -nE "s/^[^=]*=[[:space:]]*['\"]([0-9.]+)['\"].*/\1/p" | head -1)"
     [[ "$ver" =~ ^[0-9.]+$ && ${#ver} -le 20 ]] || ver=unknown
     _wp_emit config info manual wordpress_core_version "$label" \
@@ -170,7 +182,7 @@ _wp_scan_site() {
     cfg="$(_wp_config_path "$d")"
     if [[ -n "$cfg" ]]; then
         for name in $_WP_CONSTANTS; do
-            if grep -qE "^[[:space:]]*define[[:space:]]*\([[:space:]]*['\"]${name}['\"]" "$cfg" 2>/dev/null; then
+            if _wp_grep "$cfg" -qE "^[[:space:]]*define[[:space:]]*\([[:space:]]*['\"]${name}['\"]" 2>/dev/null; then
                 present="${present:+$present, }$name"
             else
                 absent="${absent:+$absent, }$name"
@@ -210,7 +222,7 @@ _wp_scan_site() {
             slug="${p%/}"; slug="${slug##*/}"
             if ! _wp_slug_ok "$slug"; then odd=$((odd + 1)); continue; fi
             total=$((total + 1)); have[$slug]=1
-            grep -qi 'Stable tag:' "$p/readme.txt" 2>/dev/null || custom=$((custom + 1))
+            _wp_grep "$p/readme.txt" -qi 'Stable tag:' 2>/dev/null || custom=$((custom + 1))
         done
         local notable="" n
         for n in ${WATCHMAN_WP_NOTABLE_PLUGINS:-$_WP_NOTABLE_DEFAULT}; do
@@ -238,8 +250,9 @@ _wp_scan_site() {
 
     # 5. Wordfence WAF mode. grep -q only.
     local prepend=no mode
-    if grep -qsE '^[[:space:]]*auto_prepend_file[[:space:]]*=.*wordfence-waf\.php' "$d/.user.ini" "$d/php.ini" 2>/dev/null \
-       || grep -qsiE '^[[:space:]]*php_value[[:space:]]+auto_prepend_file[[:space:]].*wordfence-waf\.php' "$d/.htaccess" 2>/dev/null; then
+    if _wp_grep "$d/.user.ini" -qE '^[[:space:]]*auto_prepend_file[[:space:]]*=.*wordfence-waf\.php' 2>/dev/null \
+       || _wp_grep "$d/php.ini" -qE '^[[:space:]]*auto_prepend_file[[:space:]]*=.*wordfence-waf\.php' 2>/dev/null \
+       || _wp_grep "$d/.htaccess" -qiE '^[[:space:]]*php_value[[:space:]]+auto_prepend_file[[:space:]].*wordfence-waf\.php' 2>/dev/null; then
         prepend=yes
     fi
     if [[ -n "${have[wordfence]:-}" && "$prepend" == yes ]]; then
@@ -271,7 +284,7 @@ _wp_scan_site() {
     [[ -d "$up" ]] || return 0
     local ht="absent"
     if [[ -f "$up/.htaccess" ]]; then
-        if grep -qsiE 'php_flag[[:space:]]+engine[[:space:]]+off|Remove(Handler|Type)[[:space:]].*php|<Files(Match)?[^>]*php' "$up/.htaccess" 2>/dev/null; then
+        if _wp_grep "$up/.htaccess" -qiE 'php_flag[[:space:]]+engine[[:space:]]+off|Remove(Handler|Type)[[:space:]].*php|<Files(Match)?[^>]*php' 2>/dev/null; then
             ht="present and appears to block PHP (heuristic)"
         else
             ht="present but no PHP-blocking rule recognized"
@@ -288,13 +301,23 @@ _wp_scan_site() {
     local -A W_SZ=() W_SHA=() W_REL=()
     local W_STATE W_TOTAL W_NEWEST
     _wp_read_walk "$up"
-    if [[ "$W_STATE" != END ]]; then
+    if [[ "$W_STATE" == CAP ]]; then
+        # Hitting the PHP-file cap is itself suspicious (the walk counts only PHP-executable
+        # files) and must not hide a webshell: say so loudly, then still compare every file
+        # that WAS seen against an existing baseline. No baseline is created from a partial walk.
+        _wp_emit security high manual wordpress_uploads_php_flood "$label" \
+            "Uploads holds more PHP files than the scan cap ($label)" \
+            "wp-content/uploads of site $label holds more than ${WATCHMAN_WP_UPLOADS_MAX_FILES:-5000} PHP-executable files, the scan cap. Legitimate sites keep almost no PHP in uploads, so a flood of PHP there is either an unusual plugin or an attempt to bury a webshell past the scan. Files beyond the cap were not compared." \
+            "Report only. From your own shell, count and inspect PHP under that site's uploads (map the label with wordpress_sites); raise WATCHMAN_WP_UPLOADS_MAX_FILES only once you know why the files are there."
+        _wp_baseline_has "$label" || return 0
+    elif [[ "$W_STATE" != END ]]; then
         _wp_emit capacity info manual wordpress_uploads_walk_incomplete "$label" \
             "Uploads walk incomplete for $label" \
-            "The walk of wp-content/uploads for site $label $([[ "$W_STATE" == CAP ]] && echo "hit the file cap (WATCHMAN_WP_UPLOADS_MAX_FILES)" || echo "timed out or failed (WATCHMAN_IO_TIMEOUT)"), so the PHP count and the webshell comparison were skipped this pass. No baseline is created from a partial walk." \
+            "The walk of wp-content/uploads for site $label timed out or failed (WATCHMAN_IO_TIMEOUT), so the PHP count and the webshell comparison were skipped this pass. No baseline is created from a partial walk." \
             "Raise WATCHMAN_WP_UPLOADS_MAX_FILES or WATCHMAN_IO_TIMEOUT if this persists."
         return 0
     fi
+    if [[ "$W_STATE" == END ]]; then
     local newest="none"
     (( W_NEWEST > 0 )) && newest="$(date -d "@$W_NEWEST" +%F 2>/dev/null || echo unknown)"
     _wp_emit security info manual wordpress_uploads_php "$label" \
@@ -311,6 +334,7 @@ _wp_scan_site() {
         fi
         return 0
     fi
+    fi   # END: count + first-sight baseline; a CAP walk with a baseline falls through to compare
 
     # Compare against the baseline. Unsafe names count but are never printed.
     local -A B=()
