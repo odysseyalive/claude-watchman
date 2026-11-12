@@ -154,8 +154,10 @@ iwscan() {
         esac
     fi
 
-    # 2. End-of-life PHP in use: remi pool files per EOL branch (www.conf is the stock
-    #    pool, not a site, so it is not counted).
+    # 2. End-of-life PHP in use: remi pool files per EOL branch. Only a file that defines a
+    #    pool (has a listen= line) counts: www.conf is the stock pool, not a site, and
+    #    InterWorx drops shared settings files such as 10-iworx-process-control-timeout.conf
+    #    into every branch's php-fpm.d, so a branch with no sites still holds a .conf.
     local tok n f d
     for tok in ${WATCHMAN_EOL_PHP_IW:-$_IW_EOL_PHP_DEFAULT}; do
         tok="${tok#php}"
@@ -166,6 +168,7 @@ iwscan() {
         for f in "$d"/*.conf; do
             [[ -e "$f" ]] || continue
             [[ "${f##*/}" == www.conf ]] && continue
+            grep -qE '^[[:space:]]*listen[[:space:]]*=' "$f" 2>/dev/null || continue
             n=$((n + 1))
         done
         if (( n > 0 )); then
@@ -362,5 +365,51 @@ iwscan() {
             "The InterWorx yum repo has the $chans channel enabled. Those channels ship less-tested builds than the release channel, which is riskier on production." \
             "If this is production, switch the NodeWorx software update channel back to Release."
     fi
+
+    # 10. Failed panel logins (security log review). login.log records successful sessions
+    #     only; a failed NodeWorx/SiteWorx login is written to login_failures.log, which
+    #     the panel creates on the first failure and LFD watches when CSF's InterWorx
+    #     integration is on. Line format: "YYYY-MM-DD HH:MM:SS <NW|SW> <ip> <login>".
+    #     Counts the last 24h; the login name is never emitted, only source IPs.
+    local lfl="${IW_LOGIN_FAIL_LOG:-$root/var/log/login_failures.log}"
+    if [[ -r "$lfl" ]]; then
+        local since lmax lsum
+        since="${IW_NOW_MINUS_24H:-$(date -d '24 hours ago' '+%F %T' 2>/dev/null || true)}"
+        lmax="${WATCHMAN_IW_LOGIN_FAIL_MAX:-20}"; [[ "$lmax" =~ ^[0-9]+$ ]] || lmax=20
+        if [[ -n "$since" ]]; then
+            # Prints "<total> <distinct-ips> <top: ip(n), ...>" for lines at or after $since.
+            lsum="$(awk -v since="$since" '
+                $1 ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/ && ($1 " " $2) >= since && $4 != "" {
+                    t++; if (!($4 in c)) d++; c[$4]++ }
+                END {
+                    if (!t) exit
+                    top=""
+                    for (k = 0; k < 3; k++) { best=""; for (ip in c) if (best == "" || c[ip] > c[best]) best=ip
+                        if (best == "") break
+                        top = top (top == "" ? "" : ", ") best "(" c[best] ")"; delete c[best] }
+                    print t, d, top }' "$lfl" 2>/dev/null || true)"
+            local ltot="${lsum%% *}"
+            if [[ "$ltot" =~ ^[0-9]+$ ]] && (( ltot > lmax )); then
+                local rest="${lsum#* }" ldist ltop
+                ldist="${rest%% *}"; ltop="${rest#* }"
+                _iw_emit security medium review interworx_login_failures nodeworx-login \
+                    "$ltot failed panel logins in the last 24h" \
+                    "login_failures.log recorded $ltot failed NodeWorx/SiteWorx logins in the last 24 hours (alert above $lmax) from $ldist source IP(s). Top sources: $ltop. Sustained failures mean someone is guessing panel passwords." \
+                    "Confirm CSF's InterWorx lockout is on (INTERWORX=1 and LF_INTERWORX set in csf.conf) and that LFD is blocking the top sources (see /var/log/lfd.log). Consider limiting the panel ports to admin IPs and enabling two-factor login for panel users. Review tier: firewall changes go through the operator."
+            fi
+        fi
+    fi
+
+    # 11. Panel-installed web application auto-updates off ([scriptworx] autoupdate).
+    #     ScriptWorx is the panel's one-click app installer; with autoupdate off, apps it
+    #     installed (CMSs and the like) are not updated by the panel. Explicit off only.
+    case "$(_iw_ini_get "$ini" scriptworx autoupdate)" in
+        0|false|off|no)
+            _iw_emit config low manual interworx_scriptworx_autoupdate_off iworx-scriptworx \
+                "Auto-updates for panel-installed web apps are off" \
+                "iworx.ini [scriptworx] autoupdate is off, so web applications installed through the panel's app installer are not updated automatically. An outdated CMS is a common way into a hosting server." \
+                "If sites use panel-installed apps, either turn ScriptWorx auto-updates on in NodeWorx or confirm each site owner keeps their app patched."
+            ;;
+    esac
     return 0
 }

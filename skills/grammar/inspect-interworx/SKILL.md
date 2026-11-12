@@ -1,6 +1,6 @@
 ---
 name: inspect-interworx
-description: "OBSERVE (InterWorx/NodeWorx only): read the InterWorx control plane read-only — panel version EOL and advisories, EOL PHP pools, PHP-FPM socket drift (503s), daemontools/panel service health, plaintext panel login on 2080, CSF/APF test mode, panel brute-force wiring, qmail queue, hotfix auto-apply, pre-release channel. Self-gates to a no-op off InterWorx boxes. Detect + propose; never edits panel config or applies a fix."
+description: "OBSERVE (InterWorx/NodeWorx only): read the InterWorx control plane read-only — panel version EOL and advisories, EOL PHP pools, PHP-FPM socket drift (503s), daemontools/panel service health, plaintext panel login on 2080, CSF/APF test mode, panel brute-force wiring, failed panel logins, qmail queue, hotfix and app auto-update, pre-release channel. Self-gates to a no-op off InterWorx boxes. Detect + propose; never edits panel config or applies a fix."
 lane: coding
 allowed-tools: Read, Glob, Grep, Bash
 ---
@@ -90,6 +90,13 @@ engine returns immediately, so it is safe to run everywhere.
   use **TAI64N timestamps** and must be piped through `tai64nlocal` to be read. A plain `down`
   in `svstat` can be deliberate (a `./down` file, e.g. pop3 when Dovecot serves 110/995); only
   `down …, normally up` is a fault.
+- **Failed panel logins live in `login_failures.log`, not `login.log`.** `login.log` records
+  successful sessions only, and `iworx.log` logs a failed and a successful login identically.
+  The panel creates `/usr/local/interworx/var/log/login_failures.log` (mode 0600) on the first
+  failure, one line per failure: `YYYY-MM-DD HH:MM:SS <NW|SW> <ip> <login>`. When CSF's
+  InterWorx integration is on, LFD watches that file. A missing file just means no failure yet;
+  it is not a defect. `iwscan` counts the last 24h and reports source IPs only, never the login
+  name (threshold `WATCHMAN_IW_LOGIN_FAIL_MAX`, default 20).
 - **DNS is djbdns, not BIND.** There is no `named`/`named.conf`; do not report BIND as missing.
 - **The panel has its own stack beside the system one.** `httpd-iworx` (the panel web server on
   2080/2443), `iworx-db-mariadb` (the panel database) and the panel-only PHP-FPM
@@ -102,12 +109,9 @@ engine returns immediately, so it is safe to run everywhere.
 
 ## Not yet covered (held back, pending verification)
 
-- **Failed-login parsing of `login.log`.** No failure records have been observed to model
-  (every sampled entry is a session start), and CSF's `INTERWORX_LOG` target
-  (`login_failures.log`) does not exist on a stock box, so it is unclear whether LFD's
-  InterWorx trigger has anything to read. No finding is emitted about it.
-- **`iworx.ini` `[update] autoiworx` / `autoos`** and **`[scriptworx] autoupdate`/`updatecheck`**:
-  value semantics unverified. Only `[update] autohotfix` set to an explicit off value is flagged.
+- **`iworx.ini` `[update] autoiworx` / `autoos`** and **`[scriptworx] updatecheck`**: value
+  semantics unverified. Only `[update] autohotfix` and `[scriptworx] autoupdate` set to an
+  explicit off value are flagged.
 - **`iworx-filelist.txt` integrity verification** (the RPM-style `%attr` manifest of panel files).
 - **Other advisories by version** (IWX-CVE-2023-11439, IWX-CVE-2023-10947, and the
   IW7 < 7.13.54 side of IWX-CVE-2025-13057). Only IW6/IW7 end of life and IW8 < 8.0.30 are flagged.

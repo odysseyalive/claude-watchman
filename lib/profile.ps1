@@ -93,6 +93,8 @@ interworx_csf_integration_off:medium:-
 interworx_mail_queue_spike:high:-
 interworx_autohotfix_off:medium:-
 interworx_update_channel:low:-
+interworx_login_failures:medium:-
+interworx_scriptworx_autoupdate_off:low:-
 '@
 
 function _profile_rows {
