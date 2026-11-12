@@ -487,9 +487,12 @@ _pf_replace_settings() {   # <target> <new-file>: back up target if it changes, 
 #   _PF_RO_ANYARGS  read-only whatever the arguments, and never print file contents.
 #   _PF_RO_PREFIX   read-only subcommands of tools that also have writing ones.
 #   _PF_RO_EXACT    read-only only as the exact command the operator approved (no '*').
-_PF_RO_ANYARGS='ls|stat|df|du|free|uptime|id|whoami|uname|ps|lsof|getent|last|lastb|lastlog|who|w|dpkg-query|lsattr|lsblk|findmnt|echo|printf|true|which|readlink|realpath|basename|dirname|nproc|lscpu|lsmod'
-_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|git( -C [^ ]+)? (status|log|diff|show|rev-parse|ls-files|describe)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v'
-_PF_RO_EXACT='cat|head|tail|wc|grep|egrep|fgrep|zgrep|zcat|cut|tr|jq|diff|cmp|file|md5sum|sha1sum|sha256sum|sort|uniq|date|hostname|ss|awk|set|bash|sh|php|python3|shellcheck|journalctl|sysctl|test'
+# Interpreters (bash, php, python, awk), and tools that can write a file or set state
+# from an ordinary-looking argument (sort, uniq, date, hostname), are on no list, so
+# they are always held.
+_PF_RO_ANYARGS='ls|stat|df|du|free|uptime|id|whoami|uname|lsof|last|lastb|lastlog|who|w|dpkg-query|lsattr|lsblk|findmnt|echo|printf|true|which|readlink|realpath|basename|dirname|nproc|lscpu|lsmod'
+_PF_RO_PREFIX='apt list|apt-get (-s|--simulate|--dry-run)|apt-cache (show|policy|search|depends|rdepends)|dpkg (-l|-s|-L|--list|--status)|systemctl (status|is-active|is-enabled|is-failed|show|list-units|list-unit-files|list-timers|cat)|(apachectl|apache2ctl) (configtest|-t|-S|-M|-v|-V)|nginx (-t|-T|-v|-V)|sysctl -a|swapon --show|command -v'
+_PF_RO_EXACT='cat|head|tail|wc|grep|egrep|fgrep|zgrep|zcat|cut|tr|jq|diff|cmp|file|md5sum|sha1sum|sha256sum|ss|ps|getent|set|shellcheck|journalctl|sysctl|test|git( -C [^ ]+)? (status|log|diff|show|rev-parse|ls-files|describe)'
 _pf_rule_carryable() {
     local r="$1" cmd
     case "$r" in
@@ -499,8 +502,9 @@ _pf_rule_carryable() {
     esac
     cmd="${r#Bash(}"; cmd="${cmd%)}"; cmd="${cmd#sudo }"
     [[ -n "$cmd" && "$cmd" != \** ]] || return 1
-    # Command substitution, redirection and chaining make an "exact" rule do more than it shows.
-    [[ "$cmd" == *'`'* || "$cmd" == *'$('* || "$cmd" == *'$\('* || "$cmd" == *'>'* || "$cmd" == *';'* || "$cmd" == *'&'* ]] && return 1
+    # Substitution, redirection, pipes, chaining and newlines make a rule do more than it shows.
+    [[ "$cmd" == *'`'* || "$cmd" == *'$('* || "$cmd" == *'$\('* || "$cmd" == *'<('* || "$cmd" == *'>'* \
+       || "$cmd" == *'|'* || "$cmd" == *';'* || "$cmd" == *'&'* || "$cmd" == *$'\n'* ]] && return 1
     _pf_rule_mutates "Bash($cmd)" && return 1
     [[ "$cmd" =~ ^(${_PF_RO_ANYARGS})(\ |:|$) ]] && return 0
     [[ "$cmd" =~ ^(${_PF_RO_PREFIX})(\ |:|$) ]] && return 0
@@ -520,10 +524,12 @@ _pf_rule_mutates() {
     cmd="${rule#Bash(}"; cmd="${cmd%)}"
     cmd="${cmd#sudo }"
     [[ "$cmd" =~ ^journalctl\ .*--(vacuum|rotate|flush|sync|relinquish|setup-keys) ]] && return 0
-    [[ "$cmd" =~ ^(sort|uniq)\ .*(-o|--output) ]] && return 0
-    [[ "$cmd" =~ ^date\ .*(-s|--set) ]] && return 0
-    [[ "$cmd" =~ ^hostname\ +[^-] ]] && return 0
     [[ "$cmd" =~ ^ss\ .*(-K|--kill) ]] && return 0
+    # git can write a file or run a program from a read subcommand's flags.
+    [[ "$cmd" =~ ^git\ .*(--output|--no-index|--ext-diff|--textconv|--exec|--upload-pack|--receive-pack|\ -c\ |--config) ]] && return 0
+    # Secrets rather than changes, held the same way: the shadow databases, and process environments.
+    [[ "$cmd" =~ ^getent\ +(shadow|gshadow) ]] && return 0
+    [[ "$cmd" =~ ^ps(\ |$) && ( " ${cmd#ps} " =~ \ [a-zA-Z]*e[a-zA-Z]*\  || "$cmd" == *environ* ) ]] && return 0
     [[ "$cmd" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && return 0      # env-prefixed (WM_APPLY=1 …)
     [[ "$cmd" =~ ^(rm|rmdir|mv|cp|ln|chmod|chown|chgrp|chattr|tee|truncate|install|dd|mkfs[^\ ]*|mkdir|touch|kill|pkill|killall|reboot|shutdown|halt|poweroff|useradd|usermod|userdel|groupadd|groupdel|passwd|chpasswd|visudo|crontab|mount|umount|ufw|firewall-cmd|nft|iptables|ip6tables|pacman|dnf|yum|zypper|snap|flatpak|pip3?|npm|a2en[a-z]*|a2dis[a-z]*|phpenmod|phpdismod|service|curl|wget|scp|rsync|ssh|etckeeper)([\ ]|$) ]] && return 0
     [[ "$cmd" =~ ^(apt|apt-get|aptitude)\ +(install|remove|purge|upgrade|full-upgrade|dist-upgrade|autoremove|update|reinstall) ]] && return 0
@@ -547,6 +553,9 @@ _PF_BROAD_TREES='(etc|var|var/lib|var/log|var/run|home|root|usr|usr/local|opt|sr
 _pf_path_narrow() {
     local p="$1" stem
     [[ -n "$p" && "$p" != \~* && "$p" != *..* ]] || return 1
+    # Unnormalised paths (//etc//**, //etc/./**) would slip past the tree match below.
+    local body="${p#//}"; body="${body#/}"
+    [[ "$body" == *//* || "$body" == *'/./'* || "$body" == ./* || "$body" == */. || "$body" == . ]] && return 1
     stem="${p%/\*\*}"; stem="${stem%/\*}"
     [[ "$stem" == *'*'* ]] && return 1
     [[ "$stem" =~ ^/?/${_PF_BROAD_TREES}/*$ ]] && return 1
