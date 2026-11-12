@@ -66,7 +66,10 @@ _wp_label_ok() { [[ "$1" =~ ^wp-[0-9a-f]{10}$ ]]; }
 _wp_grep() {
     local f="$1"; shift
     [[ -f "$f" ]] || return 1
-    head -c 1048576 -- "$f" 2>/dev/null | grep "$@"
+    # Not a pipeline: under pipefail, `head | grep -q` reports a MATCH as no-match when
+    # grep exits early and head dies of SIGPIPE (reproduced: every time on a large file
+    # with an early match). Process substitution returns grep's own status.
+    grep "$@" < <(head -c 1048576 -- "$f" 2>/dev/null)
 }
 
 # wp-config.php location: the docroot, or (as WordPress itself allows) its parent.
