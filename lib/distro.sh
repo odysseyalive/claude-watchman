@@ -455,6 +455,7 @@ _fw_port_manual() {  # <fn> <backend> <spec>
 # to allowlist; optional 2nd arg = reason recorded in the csf/apf comment.
 firewall_allow() {
     local spec="$1"
+    _fw_spec_guard firewall_allow "$spec" || return
     case "$(watchman_firewall_backend)" in
         csf|apf)
             local be; be="$(watchman_firewall_backend)"
@@ -468,16 +469,47 @@ firewall_allow() {
         *) return 2 ;;
     esac
 }
+# Refuse a spec that is neither a strictly valid address nor a plain port/service spec,
+# including an address-shaped value that failed the strict check (e.g. a /0 or a bad octet),
+# so it can never fall through to the port branch.
+_fw_spec_guard() {  # <fn> <spec>
+    local s="$2"
+    if _fw_spec_is_addr "$s"; then return 0; fi
+    if [[ "$s" =~ ^[0-9.]+(/[0-9]*)?$ || "$s" == *:*:* ]] || ! _fw_spec_is_safe "$s"; then
+        echo "$1: refusing '${s//[^A-Za-z0-9._:\/-]/?}': not a valid address (IPv4 /8-/32, IPv6 /16-/128) or port spec" >&2
+        return 2
+    fi
+}
 # firewall_deny takes TWO spec shapes, because its callers need both:
 #   * PORT/proto (e.g. 443/tcp)   — close/deny a port;
 #   * IP or CIDR (e.g. 1.2.3.4/32, 2001:db8::/64) — block a source address. This is
 #     the shape inspect-logs' request_rate_spike remediation proposes, and it needs a
 #     different rule form on every backend (`ufw deny from`, a firewalld rich rule).
-_fw_spec_is_addr() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ || "$1" == *:*:* ]]; }
+#   The spec reaches a firewall CLI argv (and, for firewalld, the inside of a quoted rich
+#   rule), so an address is validated strictly: IPv4 octets 0-255 with prefix /8-/32, or
+#   IPv6 made only of hex digits and colons with prefix /16-/128. A shorter prefix is
+#   refused outright (a /0 deny blocks everyone, the operator's SSH included).
+_fw_spec_is_addr() {
+    local a="$1" ip pfx="" o
+    [[ "$a" == */* ]] && { ip="${a%/*}"; pfx="${a##*/}"; } || ip="$a"
+    [[ -z "$pfx" || "$pfx" =~ ^[0-9]{1,3}$ ]] || return 1
+    if [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+        for o in "${BASH_REMATCH[@]:1}"; do (( 10#$o <= 255 )) || return 1; done
+        [[ -z "$pfx" ]] || (( 10#$pfx >= 8 && 10#$pfx <= 32 ))
+    elif [[ "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:*:* && ${#ip} -le 39 ]]; then
+        [[ -z "$pfx" ]] || (( 10#$pfx >= 16 && 10#$pfx <= 128 ))
+    else
+        return 1
+    fi
+}
+# Anything that is not an address must look like a port/service spec (443/tcp,
+# 1000:2000/tcp, ssh): no leading '-', no whitespace, quotes or shell/rule metacharacters.
+_fw_spec_is_safe() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]*$ && ${#1} -le 64 ]]; }
 #   On csf/apf an address becomes `csf -d <addr> "<comment>"` / `apf -d <addr> "<comment>"`
 #   (optional 2nd arg = reason); a port spec is refused with the config-edit instructions.
 firewall_deny() {  # MUTATING — review-tier
     local spec="$1" fam=ipv4
+    _fw_spec_guard firewall_deny "$spec" || return
     case "$(watchman_firewall_backend)" in
         csf|apf)
             local be; be="$(watchman_firewall_backend)"
