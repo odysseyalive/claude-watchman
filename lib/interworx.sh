@@ -379,7 +379,10 @@ iwscan() {
         if [[ -n "$since" ]]; then
             # Prints "<total> <distinct-ips> <top: ip(n), ...>" for lines at or after $since.
             lsum="$(awk -v since="$since" '
-                $1 ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/ && ($1 " " $2) >= since && $4 != "" {
+                # $4 reaches finding text the model reads, so only a well-formed IPv4/IPv6
+                # address counts; anything else in that field is dropped, never echoed.
+                $1 ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/ && ($1 " " $2) >= since && length($4) <= 45 &&
+                ($4 ~ /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/ || $4 ~ /^[0-9A-Fa-f]*:[0-9A-Fa-f:.]*$/) {
                     t++; if (!($4 in c)) d++; c[$4]++ }
                 END {
                     if (!t) exit
