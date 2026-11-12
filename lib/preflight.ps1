@@ -319,6 +319,10 @@ function _pf_path_narrow([string]$p) {
     # Unnormalised paths (C://Users//**, C:/./Users) would slip past the tree match below.
     $body = $p -replace '^(//?)?([A-Za-z]:)?', ''
     if ($body -match '[\\/]{2}|[\\/]\.([\\/]|$)|^\.([\\/]|$)') { return $false }
+    # Windows path quirks that alias another path: 8.3 short names (~), trailing dots or
+    # spaces, stream/device syntax (: past the drive), and variable or wildcard characters.
+    if ($body -match '[~$?:]|[. ]([\\/]|$)') { return $false }
+    if ($p -match '^//' -and $p -notmatch '^//[A-Za-z]/') { return $false }
     $stem = $p -replace '[\\/]\*\*?$', ''
     if ($stem.Contains('*')) { return $false }
     $tree = '^(?i)(/{0,2}[A-Za-z]:|//[A-Za-z]|/)?[\\/]*((Windows|Users|ProgramData|Program Files( \(x86\))?|Windows[\\/]System32)[\\/]*)?$'
@@ -334,15 +338,19 @@ function _pf_path_narrow([string]$p) {
 # Named cmdlets only, not Get-*: Get-ItemProperty and Get-CimInstance can read stored secrets
 # (an autologon password, a process command line). Interpreters, sqlite3, and anything that
 # takes a scriptblock are on no list, so they are always held.
-$script:_PF_RO_ANYARGS = '(?i)^(Get-(Service|Process|NetTCPConnection|NetUDPEndpoint|NetFirewallProfile|NetFirewallRule|HotFix|Volume|PSDrive|Disk|Date|Command|Module|ScheduledTask|LocalUser|LocalGroup|MpComputerStatus|BitLockerVolume|ComputerInfo|ChildItem|Item|Acl|FileHash)|Test-Path|Resolve-Path|whoami|hostname|systeminfo|tasklist|netstat|ver)(\s|:|$)'
-$script:_PF_RO_PREFIX  = '(?i)^(reg\s+query|sc(\.exe)?\s+(query|qc|queryex)|net\s+(view|user|localgroup|share|session|statistics)|auditpol\s+/get|bcdedit\s+/enum|manage-bde\s+-status|netsh\s+\S+(\s+\S+)?\s+show)(\s|:|$)'
-$script:_PF_RO_EXACT   = '(?i)^(Get-Content|Select-String|type|more|findstr|cat|jq|ipconfig|git(\s+-C\s+\S+)?\s+(status|log|diff|show|rev-parse|ls-files|describe))(\s|$)'
+$script:_PF_RO_ANYARGS = '(?i)^(Get-(Service|Process|NetTCPConnection|NetUDPEndpoint|NetFirewallProfile|NetFirewallRule|HotFix|Volume|PSDrive|Disk|Date|Command|Module|ScheduledTask|LocalUser|LocalGroup|MpComputerStatus|BitLockerVolume|ComputerInfo|FileHash)|Test-Path|Resolve-Path|whoami|hostname|systeminfo|tasklist|netstat|ver)(\s|:|$)'
+$script:_PF_RO_PREFIX  = '(?i)^(sc(\.exe)?\s+(query|qc|queryex)|auditpol\s+/get|bcdedit\s+/enum|manage-bde\s+-status|netsh\s+\S+(\s+\S+)?\s+show)(\s|:|$)'
+# net user/localgroup/share take a positional argument that SETS state (net user bob newpass),
+# so only the bare listing or a single name, optionally /domain, is accepted, as a whole command.
+$script:_PF_RO_EXACT   = '(?i)^((Get-Content|Select-String|Get-ChildItem|Get-Item|Get-Acl|reg\s+query|type|more|findstr|cat|jq|ipconfig|git(\s+-C\s+\S+)?\s+(status|log|diff|show|rev-parse|ls-files|describe))(\s|$)|net\s+(view|session|statistics|(user|localgroup|share)(\s+[^\s/=]+)?)(\s+/domain)?$)'
 function _pf_rule_carryable([string]$rule) {
     if ($rule -match '^Read\((.*)\)$') { return (_pf_path_narrow $Matches[1]) }
     if ($rule -notmatch '^(PowerShell|Bash)\((.*)\)$') { return $false }
     $cmd = $Matches[2].Trim()
     if (-not $cmd -or $cmd.StartsWith('*')) { return $false }
-    if ($cmd -match '[|>;&`]|\$\(|\$\\\(') { return $false }
+    if ($cmd -match '[|>;&`(){}\r\n]|\$\(|\$\\\(|@\(') { return $false }
+    # Providers that expose secrets rather than files: the registry, environment, variables, certificates.
+    if ($cmd -match '(?i)(HKLM:|HKCU:|HKU:|HKCR:|Registry::|Env:|Variable:|Cert:|Function:)') { return $false }
     if (_pf_rule_mutates "PowerShell($cmd)") { return $false }
     if ($cmd -match $script:_PF_RO_ANYARGS) { return $true }
     if ($cmd -match $script:_PF_RO_PREFIX) { return $true }

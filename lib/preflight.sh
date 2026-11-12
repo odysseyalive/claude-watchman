@@ -559,6 +559,15 @@ _pf_path_narrow() {
     stem="${p%/\*\*}"; stem="${stem%/\*}"
     [[ "$stem" == *'*'* ]] && return 1
     [[ "$stem" =~ ^/?/${_PF_BROAD_TREES}/*$ ]] && return 1
+    # Absolute paths are checked again after resolving symlinks on this host (//var/run is
+    # /run), and /proc and /dev are refused outright: /proc/*/root and /proc/*/environ reach
+    # the whole filesystem and process secrets. Of /sys only the cgroup tree is accepted.
+    if [[ "$p" == //* ]]; then
+        local real; real="$(realpath -m -- "/${stem#//}" 2>/dev/null)" || return 1
+        [[ "$real" =~ ^/${_PF_BROAD_TREES}/*$ ]] && return 1
+        [[ "$real" == /proc || "$real" == /proc/* || "$real" == /dev || "$real" == /dev/* ]] && return 1
+        [[ ( "$real" == /sys || "$real" == /sys/* ) && "$real" != /sys/fs/cgroup/* ]] && return 1
+    fi
     return 0
 }
 
