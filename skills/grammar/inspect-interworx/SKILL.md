@@ -124,7 +124,7 @@ engine returns immediately, so it is safe to run everywhere.
   unconfirmed, so only the server-wide cron is checked (counts only; the file is never parsed).
 - **WordPress core auto-update disabled in `wp-config.php`** (`AUTOMATIC_UPDATER_DISABLED`,
   `WP_AUTO_UPDATE_CORE`): deliberately not read, because `wp-config.php` holds database
-  credentials. Needs an operator decision before it is added.
+  credentials. Operator decision (2026-11-11): do not add.
 - **`iworx-filelist.txt` integrity verification** (the RPM-style `%attr` manifest of panel files).
 - **Other advisories by version** (IWX-CVE-2023-11439, IWX-CVE-2023-10947, and the
   IW7 < 7.13.54 side of IWX-CVE-2025-13057). Only IW6/IW7 end of life and IW8 < 8.0.30 are flagged.
