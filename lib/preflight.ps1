@@ -362,7 +362,11 @@ function _pf_rule_carryable([string]$rule) {
     # Arguments must be plain filesystem paths, not provider paths (HKLM:, Env:, Cert:,
     # Registry::, Microsoft.PowerShell.Core\Environment:: ...). An allowlist: the only
     # "<name>:" accepted is a single drive letter, and any "::" is refused.
-    if ($cmd.Contains('::') -or $cmd -match '(?i)(^|[\s''"\\/])[A-Za-z][A-Za-z0-9_.\\-]+:') { return $false }
+    if ($cmd.Contains('::') -or $cmd -match '(?i)(^|[\s''"\\/,:=])[A-Za-z][A-Za-z0-9_.\\-]+:') { return $false }
+    # Belt and braces: the provider names wherever they appear, plus the two forms that can
+    # hide one after a delimiter, an argument list (a,b) and a -Param:value colon binding.
+    if ($cmd -match '(?i)(HKLM|HKCU|HKU|HKCR|Env|Variable|Cert|Function|Alias|WSMan|Registry|Environment|Certificate)\s*:' -or
+        $cmd.Contains(',') -or $cmd -match '(^|\s)-\w+:') { return $false }
     if (_pf_rule_mutates "PowerShell($cmd)") { return $false }
     if ($cmd -match $script:_PF_RO_ANYARGS) { return $true }
     if ($cmd -match $script:_PF_RO_PREFIX) { return $true }
