@@ -509,7 +509,7 @@ _pf_rule_carryable() {
     [[ "$cmd" =~ ^crontab(\ -u\ [a-z_][a-z0-9_-]*)?\ -l$ || "$cmd" == 'auditctl -l' || "$cmd" == 'auditctl -s' ]] && return 0
     # Firewall and resolver listings, verbatim only: nft reads options anywhere on the line
     # (nft list ruleset -f FILE runs FILE), and resolvectl dns/domain with arguments SET them.
-    [[ "$cmd" =~ ^nft\ list\ (ruleset|tables|chains|sets|counters)$ || "$cmd" =~ ^nft\ list\ table\ [a-z0-9_]+\ [a-zA-Z0-9_-]+$ \
+    [[ "$cmd" =~ ^nft\ list\ (ruleset|tables|chains|sets|counters)$ || "$cmd" =~ ^nft\ list\ table\ (ip|ip6|inet|arp|bridge|netdev)\ [a-zA-Z_][a-zA-Z0-9_]*$ \
        || "$cmd" =~ ^ufw\ status(\ verbose|\ numbered)?$ || "$cmd" =~ ^resolvectl\ (dns|domain)$ ]] && return 0
     _pf_rule_mutates "Bash($cmd)" && return 1
     [[ "$cmd" =~ ^(${_PF_RO_ANYARGS})(\ |:|$) ]] && return 0
