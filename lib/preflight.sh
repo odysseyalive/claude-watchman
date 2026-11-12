@@ -531,8 +531,8 @@ _pf_rule_mutates() {
     cmd="${cmd#sudo }"
     [[ "$cmd" =~ ^journalctl\ .*--(vacuum|rotate|flush|sync|relinquish|setup-keys) ]] && return 0
     [[ "$cmd" =~ ^ss\ .*(-K|--kill) ]] && return 0
-    # ausearch --checkpoint writes a checkpoint file; aureport/ausearch -if only read.
-    [[ "$cmd" =~ ^(ausearch|aureport)\ .*(--checkpoint|(^|\ )-ck?(\ |$)) ]] && return 0
+    # ausearch --checkpoint writes a checkpoint file (-c is the command-name filter, a read).
+    [[ "$cmd" =~ ^(ausearch|aureport)\ .*--checkpoint ]] && return 0
     # git can write a file or run a program from a read subcommand's flags.
     [[ "$cmd" =~ ^git\ .*(--output|--no-index|--ext-diff|--textconv|--exec|--upload-pack|--receive-pack|\ -c\ |--config) ]] && return 0
     # Secrets rather than changes, held the same way: the shadow databases, and process environments.
