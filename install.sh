@@ -241,6 +241,14 @@ fi
 # --- 1. Detect family + profile --------------------------------------------
 FAMILY="$(watchman_family)"
 [[ "$FAMILY" == unknown ]] && die "Unsupported platform (need Debian/Ubuntu, RHEL family, Arch, or macOS with Homebrew)."
+# A re-run (update) keeps the profile the operator already chose. The guess below is
+# only for a first install: passed to preflight as WATCHMAN_PROFILE it outranks the
+# config, so a guess that disagreed would silently rebuild the wrong allowlist.
+if [[ -z "$PROFILE" && -f "$ROOT/config/watchman.conf" ]]; then
+    PROFILE="$(. "$ROOT/config/watchman.conf" 2>/dev/null && printf '%s' "${WATCHMAN_PROFILE:-}")"
+    [[ "$PROFILE" == server || "$PROFILE" == workstation ]] || PROFILE=""
+    [[ -n "$PROFILE" ]] && say "Profile from config/watchman.conf: $PROFILE"
+fi
 if [[ -z "$PROFILE" ]]; then
     IFS=$'\t' read -r GUESS GUESS_WHY < <(_profile_guess)
     if [[ "$ASSUME_YES" == yes || ! -t 0 ]]; then

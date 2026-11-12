@@ -35,7 +35,9 @@
 #
 # settings.json (the base) is NEVER clobbered if present (operator may tune it);
 # settings.local.json / settings.fix.json / settings.dev.json are regenerated each
-# run from the manifests.
+# run from the manifests. settings.local.json keeps the operator's own read-only
+# approvals across regeneration, and any file that changes is backed up first to
+# journal/pre-update-backup-*-preflight/ (see preflight_write_local_settings).
 
 set -o pipefail
 _PF_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -438,7 +440,7 @@ preflight_write_base_settings() {
             | .permissions.defaultMode = "dontAsk"
             | .permissions.deny = ($existing + ($base - $existing))
             ' "$target" > "$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
-            mv "$tmp" "$target"
+            _pf_replace_settings "$target" "$tmp" || return 0
             echo "preflight: repaired base settings.json (defaultMode=$cur->dontAsk, +${missing:-?} deny-base rule(s) re-asserted) — the loop requires both (use 'watchman dev' for an edit session)." >&2
         else
             rm -f "$tmp"
@@ -454,19 +456,144 @@ preflight_write_base_settings() {
     echo "preflight: wrote base policy $target" >&2
 }
 
+# --- Never lose a settings file to regeneration ------------------------------
+# Rewriting a settings file is an overwrite, which the Prime Directive treats as
+# destructive. So before any regenerated profile replaces a file whose content
+# differs, the old file is copied to journal/pre-update-backup-<stamp>-preflight/
+# (gitignored; retention never prunes it). One directory per preflight run.
+_PF_BACKUP_DIR=""
+_pf_replace_settings() {   # <target> <new-file>: back up target if it changes, then move new into place
+    local target="$1" new="$2"
+    if [[ -f "$target" ]] && ! cmp -s "$target" "$new"; then
+        if [[ -z "$_PF_BACKUP_DIR" ]]; then
+            _PF_BACKUP_DIR="$WATCHMAN_ROOT/journal/pre-update-backup-$(date +%Y%m%d-%H%M%S)-$$-preflight"
+        fi
+        mkdir -p "$_PF_BACKUP_DIR/.claude" && cp -p "$target" "$_PF_BACKUP_DIR/.claude/" || {
+            rm -f "$new"
+            echo "preflight: could not back up $target — left it unchanged." >&2
+            return 1
+        }
+    fi
+    mv -f "$new" "$target"
+}
+
+# Can this allow rule change the system? Used to keep the loop profile read-only
+# when carrying operator rules forward. Conservative: Edit/Write, anything that
+# runs a script or reaches the network, and the known mutating verbs all count.
+_pf_rule_mutates() {
+    local rule="$1" cmd
+    case "$rule" in
+        Edit\(*|Write\(*|NotebookEdit*) return 0 ;;
+        Bash\(*) ;;
+        *) return 1 ;;
+    esac
+    cmd="${rule#Bash(}"; cmd="${cmd%)}"
+    cmd="${cmd#sudo }"
+    [[ "$cmd" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && return 0      # env-prefixed (WM_APPLY=1 …)
+    [[ "$cmd" =~ ^(rm|rmdir|mv|cp|ln|chmod|chown|chgrp|chattr|tee|truncate|install|dd|mkfs[^\ ]*|mkdir|touch|kill|pkill|killall|reboot|shutdown|halt|poweroff|useradd|usermod|userdel|groupadd|groupdel|passwd|chpasswd|visudo|crontab|mount|umount|ufw|firewall-cmd|nft|iptables|ip6tables|pacman|dnf|yum|zypper|snap|flatpak|pip3?|npm|a2en[a-z]*|a2dis[a-z]*|phpenmod|phpdismod|service|curl|wget|scp|rsync|ssh|etckeeper)([\ ]|$) ]] && return 0
+    [[ "$cmd" =~ ^(apt|apt-get|aptitude)\ +(install|remove|purge|upgrade|full-upgrade|dist-upgrade|autoremove|update|reinstall) ]] && return 0
+    [[ "$cmd" =~ ^(dpkg|rpm)\ +-[a-zA-Z]*[iUePr] ]] && return 0
+    [[ "$cmd" =~ ^systemctl\ +(start|stop|restart|reload|try-restart|reload-or-restart|enable|disable|mask|unmask|set-property|daemon-reload|daemon-reexec|kill|edit|isolate|set-default|link|revert|reset-failed) ]] && return 0
+    [[ "$cmd" =~ ^(apachectl|apache2ctl|httpd)\ +(-k\ +)?(graceful|restart|start|stop|graceful-stop) ]] && return 0
+    [[ "$cmd" =~ ^nginx\ +-s ]] && return 0
+    [[ "$cmd" =~ ^sysctl\ +(-w|-p|--write|--load) ]] && return 0
+    [[ "$cmd" =~ ^sed\ +(-[a-zA-Z]*i|--in-place) ]] && return 0
+    [[ "$cmd" =~ ^git\ +(-C\ +[^\ ]+\ +)?(commit|push|pull|fetch|reset|checkout|switch|restore|merge|rebase|clean|stash|add|rm|mv|tag|branch|init|clone|apply|am|cherry-pick|revert) ]] && return 0
+    # An interpreter given a script (not just a flag such as -n or --version) runs arbitrary code.
+    [[ "$cmd" =~ ^(bash|sh|zsh|dash|php|python[0-9.]*|perl|ruby|node)\ +[^-] ]] && return 0
+    return 1
+}
+
+# Does this rule or directory grant a whole system tree? The same trees `update --check`
+# refuses in a manifest: what a session reads goes to the model provider, so a carried-
+# forward Read(//etc/**) or /root would undo least privilege for good.
+_PF_BROAD_TREES='(etc|var|var/lib|var/log|home|root|usr|usr/local|opt|srv|tmp|boot|proc|sys|dev|run)?'
+_pf_rule_broad() {
+    local r="$1"
+    [[ "$r" =~ ^(Read|Edit|Write)\(/?/${_PF_BROAD_TREES}/*(\*\*?)?\)$ ]] && return 0
+    [[ "$r" =~ ^/?/${_PF_BROAD_TREES}/*$ ]] && return 0
+    return 1
+}
+
 # --- Emit settings.local.json ----------------------------------------------
+# Claude Code writes the operator's "always allow" approvals into this same file, so
+# regenerating it wholesale silently deleted them on every update. The generated
+# rules are therefore recorded in .claude/.watchman-generated.json, and on the next
+# run anything in the file that is NOT in that record is the operator's and is kept.
+#
+# An install from before the record existed has no record to compare against. Its
+# generator output is recognised by two signatures that Claude Code itself never
+# writes: path rules with a single leading slash (Read(/etc/**)) and doubled-slash
+# additionalDirectories (//etc). Rules the current generator produces are generated
+# by definition. Everything else is treated as the operator's.
+#
+# Operator rules that can change the system are NOT carried into this profile: it is
+# the read-only loop allowlist, and dontAsk would run them unattended. They stay in
+# the backup and are listed, so the operator can re-grant any of them deliberately.
 preflight_write_local_settings() {
     local claude_dir="$1" target="$1/settings.local.json"
+    local record="$1/.watchman-generated.json"
     mkdir -p "$claude_dir"
     local allow dirs
     allow="$(cat "$WATCHMAN_ROOT/.pf.allow" 2>/dev/null)"
     dirs="$(cat "$WATCHMAN_ROOT/.pf.dirs" 2>/dev/null)"
+
+    local -a kept=() held=() kept_dirs=()
+    if [[ -f "$target" ]] && jq -e . "$target" >/dev/null 2>&1; then
+        local prev_allow="" prev_dirs="" legacy=no r
+        if [[ -f "$record" ]] && jq -e . "$record" >/dev/null 2>&1; then
+            prev_allow="$(jq -r '.allow[]?' "$record")"
+            prev_dirs="$(jq -r '.additionalDirectories[]?' "$record")"
+        else
+            legacy=yes
+        fi
+        while IFS= read -r r; do
+            [[ -n "$r" ]] || continue
+            grep -qxF -- "$r" <<< "$allow" && continue
+            grep -qxF -- "$r" <<< "$prev_allow" && continue
+            [[ "$legacy" == yes && "$r" =~ ^(Read|Edit|Write)\(/[^/] ]] && continue
+            if _pf_rule_mutates "$r" || _pf_rule_broad "$r"; then held+=("$r"); else kept+=("$r"); fi
+        done < <(jq -r '.permissions.allow[]? | strings' "$target")
+        while IFS= read -r r; do
+            [[ -n "$r" ]] || continue
+            grep -qxF -- "$r" <<< "$dirs" && continue
+            grep -qxF -- "$r" <<< "$prev_dirs" && continue
+            [[ "$legacy" == yes && "$r" == //* ]] && continue
+            if _pf_rule_broad "$r"; then held+=("additionalDirectories: $r"); else kept_dirs+=("$r"); fi
+        done < <(jq -r '.permissions.additionalDirectories[]? | strings' "$target")
+    fi
+
+    local new; new="$(mktemp "${target}.XXXXXX")" || return 1
+    local extra_allow extra_dirs
+    extra_allow="$(printf '%s\n' "${kept[@]}")"
+    extra_dirs="$(printf '%s\n' "${kept_dirs[@]}")"
+    jq -n --arg allow "$allow" --arg dirs "$dirs" --arg xa "$extra_allow" --arg xd "$extra_dirs" \
+          --slurpfile old <( [[ -f "$target" ]] && jq -e . "$target" 2>/dev/null || echo '{}' ) '
+      def lines: split("\n") | map(select(length>0));
+      def ordered_unique: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
+      ($old[0] // {}) as $o
+      | $o * {permissions: (($o.permissions // {}) * {
+           allow: (($allow | lines) + ($xa | lines) | ordered_unique),
+           additionalDirectories: (($dirs | lines) + ($xd | lines) | ordered_unique)
+        })}' > "$new" || { rm -f "$new"; echo "preflight: could not build $target" >&2; return 1; }
+    _pf_replace_settings "$target" "$new" || return 1
     jq -n --arg allow "$allow" --arg dirs "$dirs" '
-      {permissions: {
-         allow: ($allow | split("\n") | map(select(length>0))),
-         additionalDirectories: ($dirs | split("\n") | map(select(length>0)))
-      }}' > "$target"
+      def lines: split("\n") | map(select(length>0));
+      {allow: ($allow | lines), additionalDirectories: ($dirs | lines)}' > "$record"
+
     echo "preflight: wrote agent allowlist $target ($(jq '.permissions.allow|length' "$target") allow rules)" >&2
+    if (( ${#kept[@]} + ${#kept_dirs[@]} )); then
+        echo "preflight: kept $(( ${#kept[@]} + ${#kept_dirs[@]} )) operator-approved rule(s)/dir(s) already in that file." >&2
+    fi
+    if (( ${#held[@]} )); then
+        echo "preflight: NOTICE — ${#held[@]} operator-approved rule(s) can change the system or read a whole system" >&2
+        echo "           tree, so they were NOT carried into the read-only loop allowlist (dontAsk would run them unattended):" >&2
+        printf '             %s\n' "${held[@]}" >&2
+        echo "           The previous file, with these rules, is saved in $_PF_BACKUP_DIR/.claude/" >&2
+        echo "           In the loop they now auto-deny; for remediation work use 'watchman fix', which prompts for each." >&2
+    fi
+    [[ -n "$_PF_BACKUP_DIR" ]] && echo "preflight: previous settings saved to $_PF_BACKUP_DIR/.claude/" >&2
+    return 0
 }
 
 # --- Emit settings.fix.json (the FIX profile) -------------------------------
@@ -488,13 +615,15 @@ preflight_write_fix_settings() {
     allow="$( { cat "$WATCHMAN_ROOT/.pf.allow" "$WATCHMAN_ROOT/.pf.fix.allow" 2>/dev/null; printf 'WebSearch\nWebFetch\n'; } | awk 'NF' | sort -u)"
     dirs="$(cat "$WATCHMAN_ROOT/.pf.dirs"  "$WATCHMAN_ROOT/.pf.fix.dirs"  2>/dev/null | awk 'NF' | sort -u)"
     deny="$(_pf_deny_base)"
+    local new; new="$(mktemp "${target}.XXXXXX")" || return 1
     jq -n --arg allow "$allow" --arg dirs "$dirs" --arg deny "$deny" '
       {permissions: {
          defaultMode: "default",
          deny:  ($deny  | split("\n") | map(select(length>0))),
          allow: ($allow | split("\n") | map(select(length>0))),
          additionalDirectories: ($dirs | split("\n") | map(select(length>0)))
-      }}' > "$target"
+      }}' > "$new" || { rm -f "$new"; return 1; }
+    _pf_replace_settings "$target" "$new" || return 1
     echo "preflight: wrote fix profile $target ($(jq '.permissions.allow|length' "$target") allow rules, default mode)" >&2
 }
 
@@ -516,13 +645,15 @@ preflight_write_dev_settings() {
         'Bash(shellcheck *)' \
         'Bash(sqlite3 *)' \
         'Skill(watchman)')"
+    local new; new="$(mktemp "${target}.XXXXXX")" || return 1
     jq -n --arg allow "$allow" --arg deny "$deny" --arg root "$root" '
       {permissions: {
          defaultMode: "acceptEdits",
          deny:  ($deny  | split("\n") | map(select(length>0))),
          allow: ($allow | split("\n") | map(select(length>0))),
          additionalDirectories: [$root]
-      }}' > "$target"
+      }}' > "$new" || { rm -f "$new"; return 1; }
+    _pf_replace_settings "$target" "$new" || return 1
     echo "preflight: wrote dev profile $target (acceptEdits, repo-write)" >&2
 }
 
