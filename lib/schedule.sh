@@ -40,6 +40,19 @@ WATCHMAN_ROOT="${WATCHMAN_ROOT:-$(cd "$_SCHED_LIB_DIR/.." && pwd)}"
 
 SCHED_LEDGER="${SCHED_LEDGER:-$WATCHMAN_ROOT/journal/run-ledger.tsv}"
 SCHED_RUNLOG="${SCHED_RUNLOG:-$WATCHMAN_ROOT/journal/run.log}"
+
+# One run.log line saying why a headless pass failed, from `claude -p` JSON on stdin.
+# run.log's tail is mailed in alerts, so the text is made one line, stripped of control
+# characters, capped at 300 characters, and anything credential-shaped is redacted.
+_sched_error_line() {
+    jq -r --arg s "$1" '
+        def clean: tostring
+          | gsub("[[:cntrl:]]+"; " ")
+          | gsub("(?i)(?<k>pass(word)?|passwd|secret|token|api[_-]?key|authorization|bearer|cookie|smtp_pass)(?<sep>[\\x22\\x27 ]*[:=][\\x22\\x27 ]*|\\s+)[\\x22\\x27]?((?i:bearer|basic|token)\\s+)?[^\\s,;\\x22\\x27]+"; "\(.k)=[redacted]")
+          | gsub("(sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|AKIA[A-Z0-9]{12,}|eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9._-]+)"; "[redacted]")
+          | .[0:300];
+        "[" + $s + "] watchman run: error: " + ((.subtype // "") | clean) + " " + ((.result // "") | clean)'
+}
 SCHED_RUNLOCK="${SCHED_RUNLOCK:-$WATCHMAN_ROOT/journal/run.lock}"
 SCHED_CRON_MARK="# claude-watchman loop"
 SCHED_UNIT_MARK="# managed by claude-watchman"
@@ -148,9 +161,10 @@ _sched_run_pass() {
         echo "[$started] watchman run: cost \$$cost tokens ${intok}/${outtok} turns ${turns} rc=$rc" >>"$SCHED_RUNLOG"
         # Keep the WHY of a failed pass: Claude's own error text lives only in this JSON,
         # which is deleted below (#1005: 19 alerts said "failed" and none said why).
+        # run.log's tail is mailed in alerts, so the text is made one line, stripped of
+        # control characters, capped, and anything credential-shaped is redacted.
         if [[ "$rc" != 0 || "$iserr" == true ]]; then
-            jq -r --arg s "$started" '"[" + $s + "] watchman run: error: " + (.subtype // "") + " " + ((.result // "") | tostring | .[0:500])' \
-                "$out" >>"$SCHED_RUNLOG" 2>/dev/null || true
+            _sched_error_line "$started" < "$out" >>"$SCHED_RUNLOG" 2>/dev/null || true
         fi
         _sched_assert_pass_healthy "$rc" "$iserr" "$outtok" "$turns" "$sid" "$started" "$since_utc" || true
     else
